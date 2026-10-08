@@ -10,7 +10,7 @@ measure_depth() {
     local tmpdir
     local prefix
     local mean_depth
-    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/mosdepth.XXXXXX")"
+    tmpdir="$(mktemp -d "${TMP_DIR:-${TMPDIR:-/tmp}}/mosdepth.XXXXXX")"
     # shellcheck disable=SC2064
     trap "rm -rf '${tmpdir}'" RETURN
     prefix="${tmpdir}/depth"

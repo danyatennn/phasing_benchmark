@@ -43,7 +43,8 @@ n_unphased=$("${BCFTOOLS}" index -n "${TRUTH_UNPHASED}")
 [[ "${n_phased}" == "${n_unphased}" ]] \
   || die "site sets differ: ${n_phased} phased vs ${n_unphased} unphased"
 
-gt_tmp="$(mktemp)"
+mkdir -p "${TMP_DIR}"
+gt_tmp="$(mktemp -p "${TMP_DIR}")"
 trap 'rm -f "${gt_tmp}"' EXIT
 
 "${BCFTOOLS}" query -f '[%GT]\n' "${TRUTH_UNPHASED}" >"${gt_tmp}"

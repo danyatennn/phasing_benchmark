@@ -35,6 +35,7 @@ LOGS_DIR="${PROJECT_ROOT}/logs"
 VCF_DIR="${PROJECT_ROOT}/vcf"
 PHASE_DIR="${PROJECT_ROOT}/phased"
 METRICS_DIR="${PROJECT_ROOT}/metrics"
+TMP_DIR="${PROJECT_ROOT}/tmp"
 
 SING="/autofs/bal33/zxzheng/env/miniconda2/envs/singularity-env/bin/singularity"
 CLAIR3_SIF="${PROJECT_ROOT}/clair3_gpu.sif"

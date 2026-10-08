@@ -6,7 +6,7 @@ source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline
 source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
-mkdir -p "${PHASE_DIR}" "${LOGS_DIR}/phase"
+mkdir -p "${PHASE_DIR}" "${LOGS_DIR}/phase" "${TMP_DIR}"
 
 phase_one() {
   set -euo pipefail
@@ -43,7 +43,7 @@ phase_one() {
       ;;
 
     margin)
-      local tmp; tmp="$(mktemp -d)"
+      local tmp; tmp="$(mktemp -d -p "${TMP_DIR}")"
       "${BCFTOOLS}" view "${vcf_in}" >"${tmp}/in.vcf"
 
       "${MARGIN}" phase \
@@ -60,7 +60,7 @@ phase_one() {
       ;;
 
     hapcut2)
-      local tmp; tmp="$(mktemp -d)"
+      local tmp; tmp="$(mktemp -d -p "${TMP_DIR}")"
       "${BCFTOOLS}" view "${vcf_in}" >"${tmp}/in.vcf"
 
       "${HAPCUT2_BIN}/extractHAIRS" \
@@ -91,7 +91,7 @@ phase_one() {
       ;;
 
     longphase)
-      local tmp; tmp="$(mktemp -d)"
+      local tmp; tmp="$(mktemp -d -p "${TMP_DIR}")"
       "${BCFTOOLS}" view "${vcf_in}" >"${tmp}/in.vcf"
 
       "${LONGPHASE}" phase \
@@ -115,7 +115,7 @@ export -f phase_one vcf_name sub_bam bam_key longphase_flag margin_params \
           hapcut2_flag is_done log warn die
 export PHASE_DIR VCF_DIR LOGS_DIR DATA_DIR REF SAMPLE REFERENCE_NAME REGION_NAME \
        TRUTH_UNPHASED WHATSHAP LONGPHASE MARGIN MARGIN_PARAMS_DIR HAPCUT2_BIN \
-       BCFTOOLS BGZIP TABIX PHASE_THREADS
+       BCFTOOLS BGZIP TABIX PHASE_THREADS TMP_DIR
 
 log "phasing: ${#CALLERS[@]} callers x ${#PLATFORMS[@]} platforms x ${#DEPTHS[@]} depths x ${#PHASERS[@]} phasers"
 
