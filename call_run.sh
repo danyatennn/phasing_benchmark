@@ -68,9 +68,11 @@ call_one() {
       ;;
 
     longcalld)
+      # --region-file keeps longcallD inside the same regions as the others
       "${LONGCALLD}" call \
           -t "${CALL_THREADS}" \
           "$(longcalld_preset "${platform}")" \
+          --region-file "${CONFIDENT_BED}" \
           "${REF}" "${bam}" \
         2>"${logf}" \
         | "${BGZIP}" -c >"${out}" \
