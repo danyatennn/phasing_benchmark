@@ -37,12 +37,13 @@ eval_one() {
   local truth_tags="${METRICS_DIR}/$(vcf_name "${platform}" "${depth}" truthtags).tsv"
 
   log "evaluating ${name}"
+  : >"${logf}"
 
-  "${WHATSHAP}" stats \
+  [[ -s "${stats}" ]] || "${WHATSHAP}" stats \
       --tsv "${stats}" \
       --chr-lengths "${CHROM_LENGTHS}" \
       "${vcf}" \
-    >"${METRICS_DIR}/${name}.stats.txt" 2>"${logf}"
+    >"${METRICS_DIR}/${name}.stats.txt" 2>>"${logf}"
 
   # truth first, then the phasing under test
   "${WHATSHAP}" compare \
@@ -53,16 +54,21 @@ eval_one() {
       "${TRUTH_PHASED}" "${vcf}" \
     >>"${logf}" 2>&1
 
-  "${WHATSHAP}" haplotag \
-      --reference "${REF}" \
-      --sample "${SAMPLE}" \
-      --ignore-read-groups \
-      --skip-missing-contigs \
-      ${HAPLOTAG_REGION:+--regions ${HAPLOTAG_REGION}} \
-      --output-haplotag-list "${tags}" \
-      -o /dev/null \
-      "${vcf}" "${bam}" \
-    >>"${logf}" 2>&1
+  # the slowest step here, and it only depends on the VCF - keep it so adding
+  # columns later means deleting row.tsv, not redoing every haplotag
+  if [[ ! -s "${tags}" ]]; then
+    "${WHATSHAP}" haplotag \
+        --reference "${REF}" \
+        --sample "${SAMPLE}" \
+        --ignore-read-groups \
+        --skip-missing-contigs \
+        ${HAPLOTAG_REGION:+--regions ${HAPLOTAG_REGION}} \
+        --output-haplotag-list "${tags}.$$" \
+        -o /dev/null \
+        "${vcf}" "${bam}" \
+      >>"${logf}" 2>&1
+    mv -f "${tags}.$$" "${tags}"
+  fi
 
   # compare has no aggregate row, so sum numerators and denominators ourselves:
   #   switch_rate  = all_switches      / all_assessed_pairs
