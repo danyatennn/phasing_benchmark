@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+
+# Realign the sources onto T2T/CHM13, then downsample.sh is run
+
+set -euo pipefail
+
+REFERENCE_NAME="T2T"
+
+source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline.sh"
+source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
+source "/autofs/bal36/dten/phasing_benchmark/config.sh"
+
+require_vars SAMPLE SAMTOOLS MOSDEPTH PARALLEL MINIMAP2 REF_CHM13
+require_cmds "${SAMTOOLS}" "${MOSDEPTH}" "${PARALLEL}" "${MINIMAP2}"
+require_file "${REF_CHM13}" "T2T reference"
+mkdir -p "${T2T_SRC_DIR}" "${MMI_DIR}"
+
+minimap2_preset() {
+  case "$1" in
+    ont4k|ont5k) printf 'lr:hq\n' ;;
+    hifi|revio)  printf 'map-hifi\n' ;;
+    *) die "no minimap2 preset for platform '$1'" ;;
+  esac
+}
+
+preset_mmi() {
+  printf '%s/chm13.%s.mmi\n' "${MMI_DIR}" "${1//:/_}"
+}
+
+build_index() {
+  local preset="$1"
+  local mmi; mmi="$(preset_mmi "${preset}")"
+  [[ -s "${mmi}" ]] && { log "index ${preset}: exists"; return 0; }
+  log "building minimap2 index for ${preset}"
+  "${MINIMAP2}" -t "${ALIGN_THREADS}" -x "${preset}" -d "${mmi}.tmp" "${REF_CHM13}"
+  mv -f "${mmi}.tmp" "${mmi}"
+}
+
+align_source() {
+  local platform="$1"
+  local src; src="$(source_bam "${platform}" GRCh38)"
+  local preset; preset="$(minimap2_preset "${platform}")"
+  local mmi; mmi="$(preset_mmi "${preset}")"
+  local out; out="$(source_bam "${platform}")"
+
+  [[ -s "${out}" && -s "${out}.bai" ]] \
+    && { log "${platform}: T2T source exists"; return 0; }
+
+  require_file "${src}" "GRCh38 source BAM for ${platform}"
+
+  local rg
+  rg="$("${SAMTOOLS}" view -H "${src}" | grep -m1 '^@RG' || true)"
+  [[ -n "${rg}" ]] || rg="$(printf '@RG\tID:%s\tSM:%s' "${platform}" "${SAMPLE}")"
+  rg="$(printf '%s' "${rg}" | sed 's/\t/\\t/g')"
+
+  log "${platform}: $(basename "${src}") -> T2T (${preset})"
+  rm -f "${out}.tmp" "${out}.tmp.bai"
+
+  "${SAMTOOLS}" fastq -@ "${SORT_THREADS}" -n -T MM,ML "${src}" \
+    | "${MINIMAP2}" -t "${ALIGN_THREADS}" -ax "${preset}" -y -R "${rg}" "${mmi}" - \
+    | "${SAMTOOLS}" sort -@ "${SORT_THREADS}" -o "${out}.tmp" -
+
+  "${SAMTOOLS}" index -@ "${SORT_THREADS}" "${out}.tmp"
+  mv -f "${out}.tmp"     "${out}"
+  mv -f "${out}.tmp.bai" "${out}.bai"
+
+  log "${platform}: T2T source ready"
+}
+
+measure_sources() {
+  local todo=() platform
+  for platform in "${PLATFORMS[@]}"; do
+    if [[ -s "${DEPTH_TSV}" ]] && [[ -n "$(source_depth "${platform}")" ]]; then
+      log "  ${platform}: $(source_depth "${platform}")x (cached)"
+    else
+      todo+=("${platform}")
+    fi
+  done
+  [[ ${#todo[@]} -eq 0 ]] && return 0
+
+  local tmp="${DATA_DIR}/.source_depth_T2T_tmp"
+  rm -rf "${tmp}"; mkdir -p "${tmp}"
+  for platform in "${PLATFORMS[@]}"; do
+    [[ -s "${DEPTH_TSV}" ]] || continue
+    local cached; cached="$(source_depth "${platform}")"
+    [[ -n "${cached}" ]] && printf '%s\n' "${cached}" >"${tmp}/${platform}"
+  done
+
+  log "measuring T2T source depth for: ${todo[*]}"
+  export -f measure_depth die
+  export MOSDEPTH MOSDEPTH_THREADS="${DEPTH_THREADS}"
+  "${PARALLEL}" -j "${#todo[@]}" \
+      "measure_depth ${T2T_SRC_DIR}/{}.bam > ${tmp}/{}" ::: "${todo[@]}" \
+    || die "T2T source depth measurement failed"
+
+  printf 'platform\tmean_depth\n' >"${DEPTH_TSV}"
+  for platform in "${PLATFORMS[@]}"; do
+    printf '%s\t%s\n' "${platform}" "$(<"${tmp}/${platform}")" >>"${DEPTH_TSV}"
+    log "  ${platform}: $(<"${tmp}/${platform}")x"
+  done
+  rm -rf "${tmp}"
+}
+
+log "aligning ${#PLATFORMS[@]} sources to $(basename "${REF_CHM13}")"
+for preset in lr:hq map-hifi; do
+  build_index "${preset}"
+done
+for platform in "${PLATFORMS[@]}"; do
+  align_source "${platform}"
+done
+
+log "T2T source depth -> ${DEPTH_TSV}"
+measure_sources
+
+log "running downsample.sh (REFERENCE_NAME=${REFERENCE_NAME})"
+REFERENCE_NAME="${REFERENCE_NAME}" bash "${PROJECT_ROOT}/downsample.sh"

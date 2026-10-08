@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+# Clair3 calling for every grid cell
+
+set -euo pipefail
+
+source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline.sh"
+source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
+source "/autofs/bal36/dten/phasing_benchmark/config.sh"
+
+require_file "${REF}"           "reference FASTA"
+require_file "${REF}.fai"       "reference FASTA index"
+require_file "${CONFIDENT_BED}" "confident-regions BED"
+mkdir -p "${CLAIR3_DIR}" "${LOGS_DIR}/clair3"
+
+# Containers run as us, otherwise the output is owned by root.
+DOCKER_USER="$(id -u):$(id -g)"
+REF_DIR="$(dirname "${REF}")"
+BED_DIR="$(dirname "${CONFIDENT_BED}")"
+
+# call_chrom <platform> <depth> <chrom>
+call_chrom() {
+  set -euo pipefail
+  local platform="$1" depth="$2" chrom="$3"
+  local key; key="$(bam_key "${platform}" "${depth}")"
+  local out="${CLAIR3_DIR}/${key}/${chrom}"
+  local vcf="${out}/merge_output.vcf.gz"
+  local logfile="${LOGS_DIR}/clair3/${key}.${chrom}.log"
+
+  is_done "${vcf}" && { log "  ${key} ${chrom}: exists"; return 0; }
+  rm -rf "${out}"
+
+  docker run --rm --gpus all --user "${DOCKER_USER}" \
+      -v "${DATA_DIR}:${DATA_DIR}:ro" \
+      -v "${REF_DIR}:${REF_DIR}:ro" \
+      -v "${BED_DIR}:${BED_DIR}:ro" \
+      -v "${CLAIR3_DIR}:${CLAIR3_DIR}" \
+      "${CLAIR3_IMAGE}" "${CLAIR3_RUN_SH}" \
+        --bam_fn="$(sub_bam "${platform}" "${depth}")" \
+        --ref_fn="${REF}" \
+        --threads="${CLAIR3_THREADS}" \
+        --platform="$(clair3_platform "${platform}")" \
+        --model_path="/opt/models/$(clair3_model "${platform}")" \
+        --sample_name="${SAMPLE}" \
+        --bed_fn="${CONFIDENT_BED}" \
+        --ctg_name="${chrom}" \
+        --output="${out}" \
+        --use_gpu \
+      >"${logfile}" 2>&1 \
+    || die "clair3 failed: ${key} ${chrom}, see ${logfile}"
+
+  log "  ${key} ${chrom}: $("${BCFTOOLS}" index -n "${vcf}") calls"
+}
+
+export -f call_chrom bam_key sub_bam clair3_platform clair3_model is_done log die
+export DATA_DIR CLAIR3_DIR LOGS_DIR REF REF_DIR BED_DIR CONFIDENT_BED SAMPLE \
+       REFERENCE_NAME CLAIR3_IMAGE CLAIR3_RUN_SH CLAIR3_THREADS BCFTOOLS \
+       DOCKER_USER CLAIR3_MODEL_ont4k CLAIR3_MODEL_ont5k CLAIR3_MODEL_hifi \
+       CLAIR3_MODEL_revio
+
+# call_one <platform> <depth>
+call_one() {
+  local platform="$1" depth="$2"
+  local key; key="$(bam_key "${platform}" "${depth}")"
+  local cell="${CLAIR3_DIR}/${key}"
+  local merged="${cell}/merge_output.vcf.gz"
+  local het_snps="${cell}/input.het_snps.vcf.gz"
+
+  [[ "${FORCE_CLAIR3:-0}" == 1 ]] && rm -rf "${cell}"
+  is_done "${het_snps}" && { log "skip ${key} (exists)"; return 0; }
+
+  require_file "$(sub_bam "${platform}" "${depth}")"     "downsampled BAM for ${key}"
+  require_file "$(sub_bam "${platform}" "${depth}").bai" "downsampled BAM index for ${key}"
+  mkdir -p "${cell}"
+
+  log "${key}: $(clair3_model "${platform}") on ${#CHROMS[@]} chromosomes"
+
+  "${PARALLEL}" \
+      --joblog "${cell}/parallel_clair3.log" \
+      -j "${CLAIR3_CHR_JOBS}" \
+      call_chrom "${platform}" "${depth}" {} \
+      ::: "${CHROMS[@]}" \
+    || die "clair3 failed for ${key}, see ${LOGS_DIR}/clair3/${key}.*.log"
+
+  local parts=() chrom
+  for chrom in "${CHROMS[@]}"; do
+    parts+=("${cell}/${chrom}/merge_output.vcf.gz")
+  done
+  "${BCFTOOLS}" concat -a -Oz -o "${merged}" "${parts[@]}"
+  "${TABIX}" -f -p vcf "${merged}"
+
+  # Phaser input: het biallelic SNPs, PASS only. Clair3 emits unphased
+  # genotypes unless --enable_phasing is passed, so there is no phase to strip.
+  "${BCFTOOLS}" view \
+      -T "${CONFIDENT_BED}" \
+      -f PASS \
+      -m2 -M2 -v snps -g het \
+      -Oz -o "${het_snps}" \
+      "${merged}"
+  "${TABIX}" -f -p vcf "${het_snps}"
+
+  log "${key}: $("${BCFTOOLS}" index -n "${het_snps}") het SNPs -> ${het_snps}"
+}
+
+log "clair3: ${#PLATFORMS[@]} platforms x ${#DEPTHS[@]} depths, ${CLAIR3_CHR_JOBS} chromosomes at a time"
+for_each_bam call_one
+log "clair3 stage done"
