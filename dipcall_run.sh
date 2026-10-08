@@ -56,6 +56,11 @@ dipcall_one() {
   require_file "${work}/dip.dip.vcf.gz" "dipcall VCF for ${name}"
 
   cp "${work}/dip.dip.vcf.gz" "${out}"
+
+  # dipcall names the sample "syndip" and takes no sample flag
+  printf '%s\n' "${SAMPLE}" >"${work}/sample.txt"
+  "${BCFTOOLS}" reheader -s "${work}/sample.txt" -o "${out}.tmp" "${out}"
+  mv -f "${out}.tmp" "${out}"
   "${TABIX}" -f -p vcf "${out}"
   cp "${work}/dip.dip.bed" "${PHASE_DIR}/${name}.dip.bed"
 
