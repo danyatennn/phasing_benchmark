@@ -57,6 +57,7 @@ eval_one() {
       --reference "${REF}" \
       --sample "${SAMPLE}" \
       --ignore-read-groups \
+      --skip-missing-contigs \
       ${HAPLOTAG_REGION:+--regions ${HAPLOTAG_REGION}} \
       --output-haplotag-list "${tags}" \
       -o /dev/null \
@@ -78,6 +79,8 @@ eval_one() {
         --reference "${REF}" \
         --sample "${SAMPLE}" \
         --ignore-read-groups \
+        --skip-missing-contigs \
+        ${HAPLOTAG_REGION:+--regions ${HAPLOTAG_REGION}} \
         --output-haplotag-list "${truth_tags}.$$" \
         -o /dev/null \
         "${TRUTH_PHASED}" "${bam}" \
