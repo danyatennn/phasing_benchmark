@@ -80,7 +80,12 @@ phase_one() {
         >>"${logf}" 2>&1 \
         || { rm -rf "${tmp}"; die "hapcut2 failed for ${name}, see ${logf}"; }
 
-      "${BGZIP}" -f -c "${tmp}/hap.phased.vcf" >"${out}"
+      # help says hap.phased.vcf, the binary writes hap.phased.VCF - take either
+      local hap_vcf; hap_vcf="$(ls "${tmp}"/hap.phased.* 2>/dev/null | head -1)"
+      [[ -n "${hap_vcf}" ]] \
+        || { rm -rf "${tmp}"; die "hapcut2 wrote no phased VCF for ${name}, see ${logf}"; }
+
+      "${BGZIP}" -f -c "${hap_vcf}" >"${out}"
       "${TABIX}" -f -p vcf "${out}"
       rm -rf "${tmp}"
       ;;

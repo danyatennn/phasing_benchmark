@@ -82,6 +82,16 @@ call_one() {
 
   "${TABIX}" -f -p vcf "${out}"
 
+  # longcallD takes no sample name, so it writes its own. Normalise it here or
+  # whatshap --sample fails downstream for that caller only.
+  if [[ "$("${BCFTOOLS}" query -l "${out}")" != "${SAMPLE}" ]]; then
+    log "${name}: renaming sample $("${BCFTOOLS}" query -l "${out}") -> ${SAMPLE}"
+    printf '%s\n' "${SAMPLE}" >"${work}/sample.txt"
+    "${BCFTOOLS}" reheader -s "${work}/sample.txt" -o "${out}.tmp" "${out}"
+    mv -f "${out}.tmp" "${out}"
+    "${TABIX}" -f -p vcf "${out}"
+  fi
+
   "${BCFTOOLS}" view -f PASS -m2 -M2 -v snps -g het -Oz -o "${het}" "${out}"
   "${TABIX}" -f -p vcf "${het}"
 
