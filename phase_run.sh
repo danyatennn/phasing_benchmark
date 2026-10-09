@@ -36,6 +36,7 @@ phase_one() {
           --reference "${REF}" \
           --sample "${SAMPLE}" \
           --ignore-read-groups \
+          --internal-downsampling "${WHATSHAP_DOWNSAMPLING}" \
           "${vcf_in}" "${bam}" \
         >"${logf}" 2>&1 \
         || die "whatshap failed for ${name}, see ${logf}"
@@ -49,6 +50,7 @@ phase_one() {
       "${MARGIN}" phase \
           "${bam}" "${REF}" "${tmp}/in.vcf" "$(margin_params "${platform}")" \
           -t "${PHASE_THREADS}" \
+          -p "${MARGIN_DEPTH}" \
           -o "${tmp}/out" \
           -M \
         >"${logf}" 2>&1 \
@@ -115,7 +117,7 @@ export -f phase_one vcf_name sub_bam bam_key longphase_flag margin_params \
           hapcut2_flag is_done log warn die
 export PHASE_DIR VCF_DIR LOGS_DIR DATA_DIR REF SAMPLE REFERENCE_NAME REGION_NAME \
        TRUTH_UNPHASED WHATSHAP LONGPHASE MARGIN MARGIN_PARAMS_DIR HAPCUT2_BIN \
-       BCFTOOLS BGZIP TABIX PHASE_THREADS TMP_DIR
+       BCFTOOLS BGZIP TABIX PHASE_THREADS TMP_DIR WHATSHAP_DOWNSAMPLING MARGIN_DEPTH
 
 log "phasing: ${#CALLERS[@]} callers x ${#PLATFORMS[@]} platforms x ${#DEPTHS[@]} depths x ${#PHASERS[@]} phasers"
 

@@ -33,7 +33,6 @@ eval_one() {
   local stats="${METRICS_DIR}/${name}.stats.tsv"
   local cmp="${METRICS_DIR}/${name}.compare.tsv"
   local tags="${METRICS_DIR}/${name}.haplotag.tsv"
-  # depends on the cell only, so it is shared by all callers and phasers
   local truth_tags="${METRICS_DIR}/$(vcf_name "${platform}" "${depth}" truthtags).tsv"
 
   log "evaluating ${name}"
@@ -45,7 +44,6 @@ eval_one() {
       "${vcf}" \
     >"${METRICS_DIR}/${name}.stats.txt" 2>>"${logf}"
 
-  # truth first, then the phasing under test
   "${WHATSHAP}" compare \
       --sample "${SAMPLE}" \
       --names truth,"${phaser}" \
@@ -54,8 +52,6 @@ eval_one() {
       "${TRUTH_PHASED}" "${vcf}" \
     >>"${logf}" 2>&1
 
-  # the slowest step here, and it only depends on the VCF - keep it so adding
-  # columns later means deleting row.tsv, not redoing every haplotag
   if [[ ! -s "${tags}" ]]; then
     "${WHATSHAP}" haplotag \
         --reference "${REF}" \
@@ -70,8 +66,7 @@ eval_one() {
     mv -f "${tags}.$$" "${tags}"
   fi
 
-  # compare has no aggregate row, so sum numerators and denominators ourselves:
-  #   switch_rate  = all_switches      / all_assessed_pairs
+  #   switch_rate = all_switches / all_assessed_pairs
   #   hamming_rate = blockwise_hamming / covered_variants
   local covered assessed switches hamming
   covered="$(cmp_sum "${cmp}" covered_variants)"
@@ -79,7 +74,6 @@ eval_one() {
   switches="$(cmp_sum "${cmp}" all_switches)"
   hamming="$(cmp_sum "${cmp}" blockwise_hamming)"
 
-  # True read haplotypes come from the phased truth. 20 cells, not 320 runs.
   if [[ ! -s "${truth_tags}" ]]; then
     "${WHATSHAP}" haplotag \
         --reference "${REF}" \
@@ -94,12 +88,12 @@ eval_one() {
     mv -f "${truth_tags}.$$" "${truth_tags}"
   fi
 
-  # haplotagging completeness: reads given a haplotype / reads seen
   local tagging
   tagging="$(awk -F'\t' 'NR > 1 { n++; if ($2 != "none") t++ }
       END { printf "%d\t%d\t%.6f", t + 0, n + 0, (n ? t / n : 0) }' "${tags}")"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "${REFERENCE_NAME}" "${REGION_NAME}" \
       "${caller}" "${platform}" "${depth}" "${phaser}" \
       "$(stats_col "${stats}" variants)" \
       "$(stats_col "${stats}" phased)" \
@@ -115,7 +109,7 @@ eval_one() {
       "$(haplotag_accuracy "${truth_tags}" "${tags}")" \
     >"${row}"
 
-  log "  ${name}: $(cut -f13 "${row}") hamming rate"
+  log "  ${name}: $(cut -f15 "${row}") hamming rate"
 }
 
 export -f eval_one vcf_name sub_bam bam_key stats_col cmp_sum haplotag_accuracy \
@@ -136,7 +130,7 @@ log "evaluating ${#CALLERS[@]} x ${#PLATFORMS[@]} x ${#DEPTHS[@]} x ${#PHASERS[@
     ::: "${PHASERS[@]}"
 
 {
-  printf 'caller\tplatform\tdepth\tphaser\tvariants\tphased\tphased_fraction\tblocks\tblock_n50'
+  printf 'reference\tregion\tcaller\tplatform\tdepth\tphaser\tvariants\tphased\tphased_fraction\tblocks\tblock_n50'
   printf '\tswitches\tswitch_rate\thamming\thamming_rate\thaplotype_accuracy'
   printf '\treads_tagged\treads_total\ttagging_completeness'
   printf '\treads_correct\treads_compared\thaplotag_accuracy\n'

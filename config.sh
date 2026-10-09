@@ -2,8 +2,6 @@ PROJECT_ROOT="/autofs/bal36/dten/phasing_benchmark"
 DATA_DIR="${PROJECT_ROOT}/data"
 
 DERIVED_DIR="${PROJECT_ROOT}/derived"
-TRUTH_PHASED="${TRUTH_PHASED:-${DERIVED_DIR}/truth.het_snps.phased.vcf.gz}"
-TRUTH_UNPHASED="${TRUTH_UNPHASED:-${DERIVED_DIR}/truth.het_snps.unphased.vcf.gz}"
 DEPTHS=(${PHASING_DEPTHS:-10 20 30 40 50})
 PLATFORMS=(${PHASING_PLATFORMS:-ont4k ont5k hifi revio})
 PHASING_BIN="/autofs/bal36/dten/miniforge3/envs/phasing/bin"
@@ -41,8 +39,15 @@ SING="/autofs/bal33/zxzheng/env/miniconda2/envs/singularity-env/bin/singularity"
 CLAIR3_SIF="${PROJECT_ROOT}/clair3_gpu.sif"
 CLAIR3_THREADS="${CLAIR3_THREADS:-32}"
 
-REF="${REF_GRCH38}"
-CONFIDENT_BED="${CONFIDENT_BED:-${HG002_GRCH38_V5Q_BED}}"
+if [[ "${REFERENCE_NAME}" == "GRCh38" ]]; then
+  REF="${REF_GRCH38}"
+  CONFIDENT_BED="${CONFIDENT_BED:-${HG002_GRCH38_V5Q_BED}}"
+  TRUTH_SRC_VCF="${TRUTH_SRC_VCF:-${HG002_GRCH38_V5Q_TRUTH_VCF}}"
+else
+  REF="${REF_CHM13}"
+  CONFIDENT_BED="${CONFIDENT_BED:-${HG002_CHM13_V5Q_BED}}"
+  TRUTH_SRC_VCF="${TRUTH_SRC_VCF:-${HG002_CHM13_V5Q_TRUTH_VCF}}"
+fi
 
 REGION_NAME="${REGION_NAME:-wgs}"
 
@@ -72,6 +77,9 @@ MARGIN_PARAMS_DIR="${SOFTWARE_DIR}/margin/params/phase"
 HIFIASM="${SOFTWARE_DIR}/hifiasm/hifiasm"
 HAPCUT2_BIN="/autofs/bal36/dten/miniforge3/envs/hapcut2/bin"
 
+WHATSHAP_DOWNSAMPLING="${WHATSHAP_DOWNSAMPLING:-15}"
+MARGIN_DEPTH="${MARGIN_DEPTH:-30}"
+
 PHASE_JOBS="${PHASE_JOBS:-6}"
 PHASE_THREADS="${PHASE_THREADS:-8}"
 EVAL_JOBS="${EVAL_JOBS:-6}"
@@ -79,6 +87,9 @@ EVAL_JOBS="${EVAL_JOBS:-6}"
 HAPLOTAG_REGION="${HAPLOTAG_REGION:-}"
 
 CHROM_LENGTHS="${DATA_DIR}/chrom_lengths_${REFERENCE_NAME}.tsv"
+
+TRUTH_PHASED="${TRUTH_PHASED:-${DERIVED_DIR}/truth${_ref_sfx}.het_snps.phased.vcf.gz}"
+TRUTH_UNPHASED="${TRUTH_UNPHASED:-${DERIVED_DIR}/truth${_ref_sfx}.het_snps.unphased.vcf.gz}"
 
 MINIMAP2="/autofs/bal36/dten/bin/minimap2-2.31_x64-linux/minimap2"
 
