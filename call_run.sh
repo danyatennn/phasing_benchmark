@@ -50,7 +50,9 @@ call_one() {
       ;;
 
     deepvariant)
-      "${SING}" exec --cleanenv --env TMPDIR=/tmp \
+      local nv=()
+      [[ "${DEEPVARIANT_USE_GPU}" == 1 ]] && nv=(--nv)
+      "${SING}" exec ${nv[@]+"${nv[@]}"} --cleanenv --env TMPDIR=/tmp \
           -B "${DATA_DIR},$(dirname "${REF}"),$(dirname "${CONFIDENT_BED}"),${CLAIR3_DIR}" \
           "${DEEPVARIANT_SIF}" \
           /opt/deepvariant/bin/run_deepvariant \
@@ -68,7 +70,6 @@ call_one() {
       ;;
 
     longcalld)
-      # --region-file keeps longcallD inside the same regions as the others
       "${LONGCALLD}" call \
           -t "${CALL_THREADS}" \
           "$(longcalld_preset "${platform}")" \
@@ -82,8 +83,6 @@ call_one() {
 
   "${TABIX}" -f -p vcf "${out}"
 
-  # longcallD takes no sample name, so it writes its own. Normalise it here or
-  # whatshap --sample fails downstream for that caller only.
   if [[ "$("${BCFTOOLS}" query -l "${out}")" != "${SAMPLE}" ]]; then
     log "${name}: renaming sample $("${BCFTOOLS}" query -l "${out}") -> ${SAMPLE}"
     printf '%s\n' "${SAMPLE}" >"${work}/sample.txt"
@@ -102,7 +101,7 @@ export -f call_one vcf_name sub_bam bam_key is_done log warn die \
           clair3_platform clair3_model deepvariant_model longcalld_preset
 export VCF_DIR CLAIR3_DIR LOGS_DIR DATA_DIR REF CONFIDENT_BED SAMPLE \
        REFERENCE_NAME REGION_NAME SING CLAIR3_SIF DEEPVARIANT_SIF LONGCALLD \
-       CLAIR3_THREADS CALL_THREADS BCFTOOLS TABIX BGZIP \
+       CLAIR3_THREADS CALL_THREADS DEEPVARIANT_USE_GPU BCFTOOLS TABIX BGZIP \
        CLAIR3_MODEL_ont4k CLAIR3_MODEL_ont5k CLAIR3_MODEL_hifi CLAIR3_MODEL_revio
 
 for caller in ${CALL_ONLY:-${VARIANT_CALLERS[@]}}; do

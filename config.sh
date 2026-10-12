@@ -63,7 +63,12 @@ PHASERS=(${PHASING_PHASERS:-whatshap longphase margin hapcut2})
 CALL_THREADS="${CALL_THREADS:-32}"
 
 CLAIR3_JOBS="${CLAIR3_JOBS:-1}"
-DEEPVARIANT_JOBS="${DEEPVARIANT_JOBS:-2}"
+DEEPVARIANT_USE_GPU="${DEEPVARIANT_USE_GPU:-1}"
+if [[ "${DEEPVARIANT_USE_GPU}" == 1 ]]; then
+  DEEPVARIANT_JOBS="${DEEPVARIANT_JOBS:-1}"
+else
+  DEEPVARIANT_JOBS="${DEEPVARIANT_JOBS:-2}"
+fi
 LONGCALLD_JOBS="${LONGCALLD_JOBS:-2}"
 
 SOFTWARE_DIR="${PROJECT_ROOT}/software"
@@ -71,7 +76,11 @@ SOFTWARE_DIR="${PROJECT_ROOT}/software"
 WHATSHAP="${PHASING_BIN}/whatshap"
 LONGPHASE="${SOFTWARE_DIR}/longphase_linux-x64"
 LONGCALLD="${SOFTWARE_DIR}/longcallD-v0.0.11_x64-linux/longcallD"
-DEEPVARIANT_SIF="${SOFTWARE_DIR}/deepvariant_1.10.0.sif"
+if [[ "${DEEPVARIANT_USE_GPU}" == 1 ]]; then
+  DEEPVARIANT_SIF="${SOFTWARE_DIR}/deepvariant_1.10.0-gpu.sif"
+else
+  DEEPVARIANT_SIF="${SOFTWARE_DIR}/deepvariant_1.10.0.sif"
+fi
 MARGIN="${SOFTWARE_DIR}/margin/build/margin"
 MARGIN_PARAMS_DIR="${SOFTWARE_DIR}/margin/params/phase"
 HIFIASM="${SOFTWARE_DIR}/hifiasm/hifiasm"
