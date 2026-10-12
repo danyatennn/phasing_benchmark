@@ -35,6 +35,10 @@ PHASE_DIR="${PROJECT_ROOT}/phased"
 METRICS_DIR="${PROJECT_ROOT}/metrics"
 TMP_DIR="${PROJECT_ROOT}/tmp"
 
+
+export SINGULARITY_TMPDIR="${SINGULARITY_TMPDIR:-${TMP_DIR}/singularity}"
+export SINGULARITY_CACHEDIR="${SINGULARITY_CACHEDIR:-${TMP_DIR}/singularity_cache}"
+
 SING="/autofs/bal33/zxzheng/env/miniconda2/envs/singularity-env/bin/singularity"
 CLAIR3_SIF="${PROJECT_ROOT}/clair3_gpu.sif"
 CLAIR3_THREADS="${CLAIR3_THREADS:-32}"

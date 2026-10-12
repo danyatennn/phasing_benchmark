@@ -8,7 +8,7 @@ source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline
 source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
-mkdir -p "${VCF_DIR}" "${CLAIR3_DIR}" "${LOGS_DIR}/call"
+mkdir -p "${VCF_DIR}" "${CLAIR3_DIR}" "${LOGS_DIR}/call" "${SINGULARITY_TMPDIR}"
 
 call_one() {
   set -euo pipefail
@@ -30,7 +30,7 @@ call_one() {
 
   case "${caller}" in
     clair3)
-      "${SING}" exec --nv --cleanenv --env TMPDIR=/tmp \
+      "${SING}" exec --nv --cleanenv --env TMPDIR="${work}" \
           -B "${DATA_DIR},$(dirname "${REF}"),$(dirname "${CONFIDENT_BED}"),${CLAIR3_DIR}" \
           "${CLAIR3_SIF}" \
           /opt/bin/run_clair3.sh \
@@ -52,7 +52,7 @@ call_one() {
     deepvariant)
       local nv=()
       [[ "${DEEPVARIANT_USE_GPU}" == 1 ]] && nv=(--nv)
-      "${SING}" exec ${nv[@]+"${nv[@]}"} --cleanenv --env TMPDIR=/tmp \
+      "${SING}" exec ${nv[@]+"${nv[@]}"} --cleanenv --env TMPDIR="${work}" \
           -B "${DATA_DIR},$(dirname "${REF}"),$(dirname "${CONFIDENT_BED}"),${CLAIR3_DIR}" \
           "${DEEPVARIANT_SIF}" \
           /opt/deepvariant/bin/run_deepvariant \
@@ -102,6 +102,7 @@ export -f call_one vcf_name sub_bam bam_key is_done log warn die \
 export VCF_DIR CLAIR3_DIR LOGS_DIR DATA_DIR REF CONFIDENT_BED SAMPLE \
        REFERENCE_NAME REGION_NAME SING CLAIR3_SIF DEEPVARIANT_SIF LONGCALLD \
        CLAIR3_THREADS CALL_THREADS DEEPVARIANT_USE_GPU BCFTOOLS TABIX BGZIP \
+       SINGULARITY_TMPDIR SINGULARITY_CACHEDIR \
        CLAIR3_MODEL_ont4k CLAIR3_MODEL_ont5k CLAIR3_MODEL_hifi CLAIR3_MODEL_revio
 
 for caller in ${CALL_ONLY:-${VARIANT_CALLERS[@]}}; do
