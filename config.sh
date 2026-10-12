@@ -36,8 +36,9 @@ METRICS_DIR="${PROJECT_ROOT}/metrics"
 TMP_DIR="${PROJECT_ROOT}/tmp"
 
 
-export SINGULARITY_TMPDIR="${SINGULARITY_TMPDIR:-${TMP_DIR}/singularity}"
-export SINGULARITY_CACHEDIR="${SINGULARITY_CACHEDIR:-${TMP_DIR}/singularity_cache}"
+SCRATCH_DIR="${SCRATCH_DIR:-${TMP_DIR}}"
+export SINGULARITY_TMPDIR="${SINGULARITY_TMPDIR:-${SCRATCH_DIR}/singularity}"
+export SINGULARITY_CACHEDIR="${SINGULARITY_CACHEDIR:-${SCRATCH_DIR}/singularity_cache}"
 
 SING="/autofs/bal33/zxzheng/env/miniconda2/envs/singularity-env/bin/singularity"
 CLAIR3_SIF="${PROJECT_ROOT}/clair3_gpu.sif"
@@ -64,9 +65,16 @@ VARIANT_CALLERS=(clair3 deepvariant longcalld)
 CALLERS=(${PHASING_CALLERS:-truth "${VARIANT_CALLERS[@]}"})
 PHASERS=(${PHASING_PHASERS:-whatshap longphase margin hapcut2})
 
+RUN_TAG="${REFERENCE_NAME}"
+RUN_TAG="${RUN_TAG}_$(IFS=-; printf '%s' "${PLATFORMS[*]}")"
+RUN_TAG="${RUN_TAG}_$(IFS=-; printf '%s' "${DEPTHS[*]}")"
+RUN_TAG="${RUN_TAG}_$(IFS=-; printf '%s' "${CALLERS[*]}")"
+
 CALL_THREADS="${CALL_THREADS:-32}"
 
 CLAIR3_JOBS="${CLAIR3_JOBS:-1}"
+GPU_DEVICE="${GPU_DEVICE:-}"
+
 DEEPVARIANT_USE_GPU="${DEEPVARIANT_USE_GPU:-1}"
 if [[ "${DEEPVARIANT_USE_GPU}" == 1 ]]; then
   DEEPVARIANT_JOBS="${DEEPVARIANT_JOBS:-1}"

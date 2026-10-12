@@ -11,12 +11,14 @@ export EVAL_JOBS="${EVAL_JOBS:-12}"
 for reference in ${RUN_REFERENCES}; do
   export REFERENCE_NAME="${reference}"
 
-  d="logs/joblog_${reference}_$(date +%F_%H%M)"
-  mkdir -p "${d}" logs
-  mv logs/parallel_*.log "${d}"/ 2>/dev/null || true
+  mkdir -p logs
 
   echo "######## ${reference} ########"
   bash bin/make_truth.sh
+
+  PHASING_CALLERS=truth bash phase_run.sh
+  PHASING_CALLERS=truth bash eval_run.sh
+
   bash call_run.sh
   bash phase_run.sh
   bash eval_run.sh

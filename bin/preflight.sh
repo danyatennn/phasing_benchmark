@@ -94,6 +94,20 @@ printf '\n-- строки метрик: 20 полей значит строка 
 awk -F'\t' 'FNR == 1 { c[NF]++ } END { for (n in c) printf "  %s полей: %s файлов\n", n, c[n] }' \
     metrics/*.row.tsv 2>/dev/null || printf '  строк пока нет\n'
 
+printf '\n-- замки: остаток от убитого хоста держит клетку навсегда --\n'
+found=0
+for l in vcf/*.lock phased/*.lock metrics/*.lock; do
+  [[ -d "${l}" ]] || continue
+  found=$((found + 1))
+  printf '  %s  с %s\n' "${l}" "$(find "${l}" -maxdepth 0 -printf '%TY-%Tm-%Td %TH:%TM')"
+done
+if [[ "${found}" -eq 0 ]]; then
+  printf '  нет\n'
+else
+  printf '  снять все: find vcf phased metrics -maxdepth 1 -name "*.lock" -type d -exec rmdir {} +\n'
+  printf '  только когда ни на одном хосте ничего не работает\n'
+fi
+
 printf '\n-- место --\n'
 df -h . | tail -1
 du -sh data derived vcf phased metrics asm tmp logs 2>/dev/null

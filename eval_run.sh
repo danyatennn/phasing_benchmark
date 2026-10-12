@@ -15,7 +15,12 @@ source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
 mkdir -p "${METRICS_DIR}" "${LOGS_DIR}/evaluate"
 
-[[ -s "${CHROM_LENGTHS}" ]] || cut -f1,2 "${REF}.fai" >"${CHROM_LENGTHS}"
+if TRUTH_TOTAL="$("${BCFTOOLS}" index -n "${TRUTH_PHASED}")"
+
+[[ ! -s "${CHROM_LENGTHS}" ]]; then
+  cut -f1,2 "${REF}.fai" >"${CHROM_LENGTHS}.$$"
+  mv -f "${CHROM_LENGTHS}.$$" "${CHROM_LENGTHS}"
+fi
 
 eval_one() {
   set -euo pipefail
@@ -26,6 +31,10 @@ eval_one() {
   local row="${METRICS_DIR}/${name}.row.tsv"
 
   [[ -s "${row}" ]] && { log "skip ${name}"; return 0; }
+
+  local lock="${row}.lock"
+  mkdir "${lock}" 2>/dev/null || { log "busy elsewhere ${name}"; return 0; }
+  trap "rmdir '${lock}' 2>/dev/null" EXIT INT TERM HUP
   [[ -s "${vcf}" ]] || { warn "no phased VCF for ${name}"; return 0; }
 
   local bam; bam="$(sub_bam "${platform}" "${REFERENCE_NAME}" "${depth}")"
@@ -88,11 +97,17 @@ eval_one() {
     mv -f "${truth_tags}.$$" "${truth_tags}"
   fi
 
+  local emitted shared correct
+  emitted="$("${BCFTOOLS}" index -n "${vcf}")"
+  shared="$("${BCFTOOLS}" isec -n=2 -w1 -c none "${TRUTH_PHASED}" "${vcf}" \
+    | awk '!/^#/ { n++ } END { print n + 0 }')"
+  correct=$((covered - hamming))
+
   local tagging
   tagging="$(awk -F'\t' 'NR > 1 { n++; if ($2 != "none") t++ }
       END { printf "%d\t%d\t%.6f", t + 0, n + 0, (n ? t / n : 0) }' "${tags}")"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "${REFERENCE_NAME}" "${REGION_NAME}" \
       "${caller}" "${platform}" "${depth}" "${phaser}" \
       "$(stats_col "${stats}" variants)" \
@@ -105,36 +120,53 @@ eval_one() {
       "${hamming}" \
       "$(awk -v a="${hamming}" -v b="${covered}" 'BEGIN{printf "%.6f", (b ? a/b : 0)}')" \
       "$(awk -v a="${hamming}" -v b="${covered}" 'BEGIN{printf "%.6f", (b ? 1 - a/b : 0)}')" \
+      "${covered}" "${assessed}" "${TRUTH_TOTAL}" "${emitted}" "${shared}" "${correct}" \
+      "$(awk -v s="${shared}" -v t="${TRUTH_TOTAL}" 'BEGIN{printf "%.6f", (t ? 1 - s/t : 0)}')" \
+      "$(awk -v s="${shared}" -v m="${emitted}"    'BEGIN{printf "%.6f", (m ? 1 - s/m : 0)}')" \
+      "$(awk -v c="${correct}" -v t="${TRUTH_TOTAL}" 'BEGIN{printf "%.6f", (t ? c/t : 0)}')" \
+      "$(awk -v c="${correct}" -v m="${emitted}"     'BEGIN{printf "%.6f", (m ? c/m : 0)}')" \
       "${tagging}" \
       "$(haplotag_accuracy "${truth_tags}" "${tags}")" \
-    >"${row}"
+    >"${row}.$$"
+  mv -f "${row}.$$" "${row}"
 
   log "  ${name}: $(cut -f15 "${row}") hamming rate"
 }
 
 export -f eval_one vcf_name sub_bam bam_key stats_col cmp_sum haplotag_accuracy \
           log warn die
+export TRUTH_TOTAL BCFTOOLS
 export METRICS_DIR PHASE_DIR LOGS_DIR DATA_DIR REF SAMPLE REFERENCE_NAME \
        HAPLOTAG_REGION \
        REGION_NAME TRUTH_PHASED CHROM_LENGTHS WHATSHAP
 
 log "evaluating ${#CALLERS[@]} x ${#PLATFORMS[@]} x ${#DEPTHS[@]} x ${#PHASERS[@]} runs"
 
+joblog="${LOGS_DIR}/parallel_evaluate_${RUN_TAG}.log"
+keep_joblog "${joblog}"
+
 "${PARALLEL}" \
-    --joblog "${LOGS_DIR}/parallel_evaluate.log" \
+    --joblog "${joblog}" \
     -j "${EVAL_JOBS}" \
     eval_one {1} {2} {3} {4} \
     ::: "${CALLERS[@]}" \
     ::: "${PLATFORMS[@]}" \
     ::: "${DEPTHS[@]}" \
-    ::: "${PHASERS[@]}"
+    ::: "${PHASERS[@]}" \
+  || true
+
+failed="$(awk 'NR > 1 && $7 != 0 { n++ } END { print n + 0 }' "${joblog}")"
+[[ "${failed}" -eq 0 ]] || warn "${failed} runs failed, logs in ${LOGS_DIR}/evaluate"
 
 {
   printf 'reference\tregion\tcaller\tplatform\tdepth\tphaser\tvariants\tphased\tphased_fraction\tblocks\tblock_n50'
   printf '\tswitches\tswitch_rate\thamming\thamming_rate\thaplotype_accuracy'
+  printf '\tcovered\tassessed\ttruth_total\temitted\tshared\tcorrect'
+  printf '\tfnr\tfdr\trecall_phased\tprecision_phased'
   printf '\treads_tagged\treads_total\ttagging_completeness'
   printf '\treads_correct\treads_compared\thaplotag_accuracy\n'
   cat "${METRICS_DIR}"/*.row.tsv
-} >"${METRICS_DIR}/summary.tsv"
+} >"${METRICS_DIR}/summary.tsv.$$"
+mv -f "${METRICS_DIR}/summary.tsv.$$" "${METRICS_DIR}/summary.tsv"
 
 log "metrics: ${METRICS_DIR}/summary.tsv"

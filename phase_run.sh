@@ -17,6 +17,10 @@ phase_one() {
 
   is_done "${out}" && { log "skip ${name}"; return 0; }
 
+  local lock="${out}.lock"
+  mkdir "${lock}" 2>/dev/null || { log "busy elsewhere ${name}"; return 0; }
+  trap "rmdir '${lock}' 2>/dev/null" EXIT INT TERM HUP
+
   local bam; bam="$(sub_bam "${platform}" "${REFERENCE_NAME}" "${depth}")"
   local logf="${LOGS_DIR}/phase/${name}.log"
 
@@ -120,13 +124,21 @@ export PHASE_DIR VCF_DIR LOGS_DIR DATA_DIR REF SAMPLE REFERENCE_NAME REGION_NAME
 
 log "phasing: ${#CALLERS[@]} callers x ${#PLATFORMS[@]} platforms x ${#DEPTHS[@]} depths x ${#PHASERS[@]} phasers"
 
+joblog="${LOGS_DIR}/parallel_phase_${RUN_TAG}.log"
+keep_joblog "${joblog}"
+
 "${PARALLEL}" \
-    --joblog "${LOGS_DIR}/parallel_phase.log" \
+    --joblog "${joblog}" \
     -j "${PHASE_JOBS}" \
     phase_one {1} {2} {3} {4} \
     ::: "${CALLERS[@]}" \
     ::: "${PLATFORMS[@]}" \
     ::: "${DEPTHS[@]}" \
-    ::: "${PHASERS[@]}"
+    ::: "${PHASERS[@]}" \
+  || true
+
+# a run whose caller never produced a VCF fails here; let the rest finish
+failed="$(awk 'NR > 1 && $7 != 0 { n++ } END { print n + 0 }' "${joblog}")"
+[[ "${failed}" -eq 0 ]] || warn "${failed} runs failed, logs in ${LOGS_DIR}/phase"
 
 log "phasing done"

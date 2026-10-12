@@ -32,7 +32,7 @@ done
 
 cd /autofs/bal36/dten/phasing_benchmark
 
-printf '\nсейчас работает:\n'
+printf '\nсейчас работает (clair3 внутри себя тоже зовёт whatshap и longphase):\n'
 for b in clair3 run_deepvariant longcallD whatshap longphase margin HAPCUT2 extractHAIRS; do
   n="$(pgrep -c -f "${b}" 2>/dev/null)" || n=0
   [[ "${n:-0}" -gt 0 ]] && printf '  %-16s %s\n' "${b}" "${n}"

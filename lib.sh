@@ -128,6 +128,11 @@ clair3_model() {
 }
 
 # is_done <vcf.gz> - non-empty VCF with a non-empty index
+keep_joblog() {
+    [[ -s "$1" ]] && cp -f "$1" "${1%.log}_$(date +%F_%H%M).log"
+    return 0
+}
+
 is_done() {
   [[ -s "$1" && -s "$1.tbi" ]]
 }
