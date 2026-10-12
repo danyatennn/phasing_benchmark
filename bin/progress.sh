@@ -6,7 +6,7 @@ set -uo pipefail
 
 RUN_REFERENCES="${RUN_REFERENCES:-GRCh38 T2T}"
 
-printf '%s\n' "$(date '+%F %H:%M')"
+printf '%s   %s\n' "$(hostname)" "$(date '+%F %H:%M')"
 
 for reference in ${RUN_REFERENCES}; do
 (
@@ -45,10 +45,42 @@ for f in logs/parallel_*.log; do
     END { if (n) printf "  %-32s задач=%-4d сбоев=%d\n", f, n, bad + 0 }' "${f}"
 done
 
+# a lock whose owner process is gone makes that cell skip forever, and only the
+# host named in the lock can tell whether the pid is still alive
+printf '\nзамки с умершим процессом этого хоста:\n'
+stale=0
+anon=0
+for l in vcf/*.lock phased/*.lock metrics/*.lock; do
+  if [[ ! -f "${l}/owner" ]]; then
+    [[ -d "${l}" ]] && anon=$((anon + 1))
+    continue
+  fi
+  read -r lhost lpid _ <"${l}/owner"
+  [[ "${lhost}" == "$(hostname)" ]] || continue
+  kill -0 "${lpid}" 2>/dev/null && continue
+  printf '  %s  (%s)\n' "${l}" "$(cat "${l}/owner")"
+  stale=$((stale + 1))
+done
+[[ "${stale}" -eq 0 ]] && printf '  нет\n'
+[[ "${anon}" -eq 0 ]] || printf '  плюс %s замков без подписи - от версии до правки, судить по времени\n' "${anon}"
+
+printf '\nпоследние ошибки из логов всех хостов:\n'
+grep -hE 'ERROR|WARN' logs/run_*.log 2>/dev/null | tail -5 | sed 's|^|  |'
+
 printf '\nпамять: '
 free -g | awk 'NR == 2 { printf "занято %s ГБ, свободно %s ГБ\n", $3, $7 }'
 
-printf 'GPU:    '
-nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader
-nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader \
-  | sed 's|^|        |'
+printf 'место:  проект %s свободно' "$(df -h . | awk 'NR == 2 { print $4 }')"
+if [[ -n "${SCRATCH_DIR:-}" && "${SCRATCH_DIR}" != "${TMP_DIR:-}" ]]; then
+  printf ', scratch %s свободно' "$(df -h "${SCRATCH_DIR}" 2>/dev/null | awk 'NR == 2 { print $4 }')"
+fi
+printf '\n'
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+  printf 'GPU:    '
+  nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv,noheader | paste -sd' | ' -
+  nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory --format=csv,noheader \
+    | sed 's|^|        |'
+else
+  printf 'GPU:    нет\n'
+fi
