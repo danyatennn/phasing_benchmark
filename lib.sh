@@ -133,6 +133,42 @@ keep_joblog() {
     return 0
 }
 
+stratum_bed()   { printf '%s/%s_%s.bed\n' "${PREPARED_DIR}" "${REFERENCE_NAME}" "$1"; }
+stratum_truth() { printf '%s/%s_%s.phased.vcf.gz\n' "${STRATA_TRUTH_DIR}" "${REFERENCE_NAME}" "$1"; }
+
+# strata.tsv is tier<TAB>category<TAB>stratum, written by bin/prepare_strata.sh.
+# STRATA_ONLY and STRATA_TIER narrow it for splitting work across hosts.
+strata_names() {
+    awk -F'\t' -v tier="${STRATA_TIER}" -v only="${STRATA_ONLY}" '
+        NR == 1 { next }
+        tier != "" && $1 != tier { next }
+        { if (only == "") { print $3; next }
+          n = split(only, want, /[ ,]+/)
+          for (i = 1; i <= n; i++) if (want[i] == $3) print $3 }
+    ' "${STRATA_LIST}"
+}
+
+# both files must be sorted by chrom then start and non-overlapping within a
+# file, which is how GIAB ships them
+bed_intersect() {
+    awk -v OFS='\t' '
+        NR == FNR { n[$1]++; s[$1, n[$1]] = $2; e[$1, n[$1]] = $3; next }
+        {
+          c = $1; a = $2; b = $3
+          if (!(c in n)) next
+          i = (c in ptr) ? ptr[c] : 1
+          while (i <= n[c] && e[c, i] <= a) i++
+          ptr[c] = i
+          for (j = i; j <= n[c] && s[c, j] < b; j++) {
+            lo = (s[c, j] > a) ? s[c, j] : a
+            hi = (e[c, j] < b) ? e[c, j] : b
+            if (hi > lo) print c, lo, hi
+          }
+        }' "$1" "$2"
+}
+
+bed_bp() { awk '{ s += $3 - $2 } END { print s + 0 }' "$1"; }
+
 is_done() {
   [[ -s "$1" && -s "$1.tbi" ]]
 }
@@ -224,4 +260,134 @@ haplotag_accuracy() {
       }
       printf "%d\t%d\t%.6f", correct + 0, total + 0, (total ? correct / total : 0)
     }' "$1" "$2"
+}
+
+# block_orientation <truth_gt.tsv> <test_gt.tsv>
+#   truth_gt  chrom pos ref alt GT        - the phased truth
+#   test_gt   chrom pos ref alt GT PS     - the VCF being scored
+# Prints chrom, PS, same, opposite, flip for every phase block of the test VCF
+# that shares at least one het SNP with the truth: how many of those SNPs are
+# phased as in the truth and how many the other way round, and flip=1 when the
+# block is the other way round on most of them.
+block_orientation() {
+  awk -F'\t' -v OFS='\t' '
+    function swapped(gt,   a) { split(gt, a, "|"); return a[2] "|" a[1] }
+    NR == FNR { truth[$1 FS $2 FS $3 FS $4] = $5; next }
+    $6 == "." || $5 !~ /\|/ { next }
+    {
+      k = $1 FS $2 FS $3 FS $4
+      if (!(k in truth)) next
+      b = $1 OFS $6
+      if ($5 == truth[k])               { same[b]++; seen[b] = 1 }
+      else if ($5 == swapped(truth[k])) { opp[b]++;  seen[b] = 1 }
+    }
+    END {
+      for (b in seen)
+        print b, same[b] + 0, opp[b] + 0, (opp[b] > same[b]) ? 1 : 0
+    }' "$1" "$2"
+}
+
+# read_accuracy <orientation.tsv> <truth tags> <test tags>
+# The tags are whatshap haplotag lists: read, haplotype, phaseset, chromosome.
+# A read takes the orientation of its block (chromosome + phaseset) and is
+# compared with its truth label. A read listed twice counts once.
+# Prints: truth_tagged tagged compared correct unoriented
+#   truth_tagged  reads with H1/H2 against the truth
+#   tagged        reads with H1/H2 against the test VCF
+#   compared      tagged by both, in a block that shares a SNP with the truth
+#   correct       of those, the truth's haplotype after orienting the block
+#   unoriented    tagged by both, but their block shares no SNP with the truth
+read_accuracy() {
+  awk -F'\t' '
+    FILENAME == ARGV[1] { flip[$1 FS $2] = $5; next }
+    /^#/ { next }
+    FILENAME == ARGV[2] {
+      if ($1 in in_truth) next
+      in_truth[$1] = 1
+      if ($2 == "H1" || $2 == "H2") { truth[$1] = $2; truth_tagged++ }
+      next
+    }
+    {
+      if ($1 in in_test) next
+      in_test[$1] = 1
+      if ($2 != "H1" && $2 != "H2") next
+      tagged++
+      if (!($1 in truth)) next
+      b = $4 FS $3
+      if (!(b in flip)) { unoriented++; next }
+      label = $2
+      if (flip[b] == 1) label = (label == "H1") ? "H2" : "H1"
+      compared++
+      if (label == truth[$1]) correct++
+    }
+    END { print truth_tagged + 0, tagged + 0, compared + 0, correct + 0, unoriented + 0 }
+  ' "$1" "$2" "$3"
+}
+
+# asm_dir <platform> <depth> <assembler> - where an assembly lives. It is built
+# from the reads of the ASM_READS_REF cell whichever reference it is scored on.
+asm_dir() {
+  printf '%s/%s_%s\n' "${ASM_DIR}" "$(bam_key "$1" "${ASM_READS_REF}" "$2")" "$3"
+}
+
+# bam_to_fastq <bam> <out.fq.gz> - every read once: samtools fastq drops the
+# secondary and supplementary records
+bam_to_fastq() {
+  "${SAMTOOLS}" view -u -@ "${SORT_THREADS}" "$1" ${ASM_REGION} \
+    | "${SAMTOOLS}" fastq -@ "${SORT_THREADS}" -n - \
+    | "${BGZIP}" -@ "${SORT_THREADS}" -c >"$2.tmp"
+  mv -f "$2.tmp" "$2"
+}
+
+# assembly_phase_sets <hap1.bed> <hap2.bed> <snps.vcf> [chromosome]
+#   hapN.bed  chrom start end contig - where each contig of haplotype N aligns
+#   snps.vcf  the assembly's het SNPs, sorted
+# Prints chrom, pos, phase set, the set named, as whatshap does, after the
+# position of its first SNP. SNPs not on a contig in both haplotypes are dropped.
+#   default     an assembly from reads alone vouches for the phase of two SNPs
+#               only while both sit on the same hap1 contig and the same hap2
+#               contig, so a set starts wherever either contig changes
+#   chromosome  a trio assembly keeps hap1 paternal from contig to contig, so
+#               the set is the whole chromosome
+assembly_phase_sets() {
+  awk -F'\t' -v OFS='\t' -v whole="${4:-}" '
+    # the contig of haplotype h over chrom:pos; SNPs come in increasing
+    # position, so the search resumes where the previous one stopped
+    function contig(h, chrom, pos,   j) {
+      if (!((h, chrom) in n)) return ""
+      if (!((h, chrom) in at)) at[h, chrom] = 1
+      while (at[h, chrom] <= n[h, chrom] && e[h, chrom, at[h, chrom]] < pos) at[h, chrom]++
+      for (j = at[h, chrom]; j <= n[h, chrom] && s[h, chrom, j] < pos; j++)
+        if (e[h, chrom, j] >= pos) return c[h, chrom, j]
+      return ""
+    }
+    FILENAME == ARGV[1] || FILENAME == ARGV[2] {
+      h = (FILENAME == ARGV[1]) ? 1 : 2
+      k = ++n[h, $1]; s[h, $1, k] = $2; e[h, $1, k] = $3; c[h, $1, k] = $4
+      next
+    }
+    /^#/ { next }
+    {
+      a = contig(1, $1, $2); b = contig(2, $1, $2)
+      if (a == "" || b == "") next
+      if ($1 != chrom || (whole == "" && (a != last_a || b != last_b))) ps = $2
+      print $1, $2, ps
+      chrom = $1; last_a = a; last_b = b
+    }' "$1" "$2" "$3"
+}
+
+# add_phase_sets <phase sets tsv> <snps.vcf> <sample> - the VCF with GT:PS,
+# only the SNPs that got a phase set, and the sample renamed
+add_phase_sets() {
+  awk -F'\t' -v OFS='\t' -v sample="$3" '
+    NR == FNR { ps[$1, $2] = $3; next }
+    /^##/ { print; next }
+    /^#CHROM/ {
+      print "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set: one pair of hap1/hap2 contigs\">"
+      $10 = sample
+      print
+      next
+    }
+    ($1, $2) in ps { $9 = "GT:PS"; $10 = $10 ":" ps[$1, $2]; print }
+  ' "$1" "$2"
 }

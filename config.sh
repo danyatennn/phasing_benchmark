@@ -33,6 +33,24 @@ LOGS_DIR="${PROJECT_ROOT}/logs"
 VCF_DIR="${PROJECT_ROOT}/vcf"
 PHASE_DIR="${PROJECT_ROOT}/phased"
 METRICS_DIR="${PROJECT_ROOT}/metrics"
+METRICS_STRATA_DIR="${PROJECT_ROOT}/metrics_strata"
+
+REGIONS_DIR="${PROJECT_ROOT}/regions"
+STRATA_DIR="${REGIONS_DIR}/strata"
+STRATA_LIST="${REGIONS_DIR}/strata.tsv"
+PREPARED_DIR="${REGIONS_DIR}/prepared"
+STRATA_TRUTH_DIR="${REGIONS_DIR}/truth"
+
+if [[ "${REFERENCE_NAME}" == "GRCh38" ]]; then
+  STRATA_REF="GRCh38"
+else
+  STRATA_REF="CHM13"
+fi
+
+REGIONS_JOBS="${REGIONS_JOBS:-12}"
+REGIONS_SHARD="${REGIONS_SHARD:-}"
+STRATA_ONLY="${STRATA_ONLY:-}"
+STRATA_TIER="${STRATA_TIER:-}"
 TMP_DIR="${PROJECT_ROOT}/tmp"
 
 
@@ -71,6 +89,11 @@ RUN_TAG="${RUN_TAG}_$(IFS=-; printf '%s' "${DEPTHS[*]}")"
 RUN_TAG="${RUN_TAG}_$(IFS=-; printf '%s' "${CALLERS[*]}")"
 
 CALL_THREADS="${CALL_THREADS:-32}"
+
+# a hung caller blocks its host until someone notices, which cost us seven hours
+# on bal34. On timeout the cell fails, the stage carries on, the lock is released
+# by the trap, and the next run picks the cell up again.
+CALL_TIMEOUT="${CALL_TIMEOUT:-12h}"
 
 CLAIR3_JOBS="${CLAIR3_JOBS:-1}"
 GPU_DEVICE="${GPU_DEVICE:-}"
@@ -131,6 +154,29 @@ ASM_DEPTHS=(${ASM_DEPTHS:-20 30 50})
 
 ASM_REGION="${ASM_REGION:-}"
 
+# An assembly does not depend on the reference, so each one is built once, from
+# the reads of the ASM_READS_REF cell, and dipcall then places it on either
+# reference.
+ASM_READS_REF="${ASM_READS_REF:-GRCh38}"
+
+# hifiasm      reads only
+# hifiasmtrio  hifiasm phased with the parental k-mers
+# verkkotrio   verkko phased with the parental k-mers, PacBio cells only
+ASM_CALLERS=(${ASM_CALLERS:-hifiasm hifiasmtrio verkkotrio})
+
+# Parents' short reads for the trio assemblies: FASTQ files, R1 and R2,
+# separated by spaces. Only reads are needed, no VCF and no parental assembly.
+PAT_READS="${PAT_READS:-}"
+MAT_READS="${MAT_READS:-}"
+TRIO_DIR="${DATA_DIR}/trio"
+TRIO_BIN="/autofs/bal36/dten/miniforge3/envs/asmtrio/bin"   # yak, meryl, merqury
+TRIO_THREADS="${TRIO_THREADS:-32}"
+TRIO_MEMORY="${TRIO_MEMORY:-200}"                             # GB, for meryl
+
+VERKKO_BIN="/autofs/bal36/dten/miniforge3/envs/verkko/bin"
+VERKKO_THREADS="${VERKKO_THREADS:-64}"
+VERKKO_MEMORY="${VERKKO_MEMORY:-400}"                         # GB
+
+# dipcall runs without a PAR file: assemblies are compared on autosomes only
 DIPCALL_BIN="/autofs/bal36/dten/miniforge3/envs/asmeval/bin"
-DIPCALL_PAR="${DIPCALL_PAR:-}"
 DIPCALL_THREADS="${DIPCALL_THREADS:-16}"
