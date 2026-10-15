@@ -65,10 +65,10 @@ stats_one() {
   local src_variants src_01 src_12 src_11 src_hemi src_other src_snp src_indel src_multi
   read -r src_variants src_01 src_12 src_11 src_hemi src_other src_snp src_indel src_multi < <(
     "${BCFTOOLS}" view -T "${bed}" "${TRUTH_SRC_VCF}" \
-      | "${BCFTOOLS}" query -f '%N_ALT\t%TYPE\t[%GT]\n' \
+      | "${BCFTOOLS}" query -f '%ALT\t%TYPE\t[%GT]\n' \
       | awk '
           { n++
-            if ($1 > 1) multi++
+            if (split($1, alt, ",") > 1) multi++
             if ($2 ~ /SNP/)   snp++
             if ($2 ~ /INDEL/) indel++
             gt = $3; gsub(/\|/, "/", gt); k = split(gt, g, "/")
