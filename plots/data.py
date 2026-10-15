@@ -22,6 +22,14 @@ ROW_COLUMNS = [
     "reads_correct", "reads_compared", "haplotag_accuracy",
 ]
 
+# readacc_run.sh: read-level accuracy with each block oriented by its variants
+READACC_COLUMNS = [
+    "reference", "region", "caller", "platform", "depth", "phaser",
+    "reads_truth_tagged", "reads_tagged", "reads_compared", "reads_correct",
+    "reads_unoriented", "read_precision", "read_recall",
+    "blocks_oriented", "blocks_flipped",
+]
+
 STRATA_COLUMNS = [
     "reference", "region", "caller", "platform", "depth", "phaser", "stratum",
     "variants", "phased", "phased_fraction", "blocks", "block_n50",
@@ -121,12 +129,18 @@ class Metrics:
         said = (row["reference"], row["caller"], row["platform"], row["depth"], row["phaser"])
         if said != (ref, caller, platform, float(depth), phaser) or row["region"] != self.region:
             return "missing"
+        # read_precision and read_recall come from readacc_run.sh, when it has
+        # scored this run; until then they read as NaN
+        acc = _read_row(os.path.join(self.metrics_dir, self.name(*key) + ".readacc.tsv"),
+                        READACC_COLUMNS)
+        if acc is not None and acc["phaser"] == phaser and acc["caller"] == caller:
+            row.update({c: acc[c] for c in READACC_COLUMNS[6:]})
         self.rows[key] = row
         return "done"
 
     def get(self, key, column):
         row = self.rows.get(key)
-        return row[column] if row is not None else NAN
+        return row.get(column, NAN) if row is not None else NAN
 
     def has(self, key):
         return key in self.rows

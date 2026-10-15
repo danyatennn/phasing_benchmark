@@ -5,6 +5,7 @@
   python plots/make_plots.py --only fig1,fig5
   python plots/make_plots.py --depth 20      the coverage of the single-depth figures
   python plots/make_plots.py --png           a PNG next to each PDF, for a quick look
+  python plots/make_plots.py --refs GRCh38   one reference only (GRCh38 against T2T needs both)
 
 One PDF per subfigure, text kept as editable type. A run that is not computed
 yet, or whose row is locked by a host, is left out; a figure with nothing to
@@ -32,7 +33,11 @@ def main():
     parser.add_argument("--only", default="", help="comma-separated prefixes, e.g. fig1,fig5a")
     parser.add_argument("--depth", type=int, default=30, choices=st.DEPTHS)
     parser.add_argument("--png", action="store_true")
+    parser.add_argument("--refs", default=" ".join(st.REFERENCES),
+                        help="references to draw, default: %(default)s")
     ctx = parser.parse_args()
+    ctx.refs = [r for r in ctx.refs.split() if r in st.REFERENCES]
+    both = all(r in ctx.refs for r in st.REFERENCES)
     ctx.out = ctx.out or os.path.join(ctx.root, "plots", "pdf")
 
     font = st.apply_style(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"))
@@ -54,7 +59,9 @@ def main():
     for fig_id, draw, per_reference in FIGURES:
         if wanted and not any(fig_id.startswith(w) for w in wanted):
             continue
-        for ref in (st.REFERENCES if per_reference else [None]):
+        if not per_reference and not both:
+            continue
+        for ref in (ctx.refs if per_reference else [None]):
             label = fig_id + (" " + ref if ref else "")
             try:
                 name = draw(db, ctx, ref) if per_reference else draw(db, ctx)

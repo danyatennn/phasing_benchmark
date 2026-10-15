@@ -184,16 +184,22 @@ def n50_mb(db, key):
     return db.get(key, "block_n50") / 1e6
 
 
-def phased_pct(db, key):
-    return 100 * db.get(key, "phased_fraction")
+def truth_phased_pct(db, key):
+    """Truth het SNPs phased in a block of two or more, out of all of them -
+    one denominator for every run of the reference."""
+    return 100 * ratio(db.get(key, "covered"), db.get(key, "truth_total"))
 
 
 def tagged_pct(db, key):
     return 100 * db.get(key, "tagging_completeness")
 
 
-def haplotag_pct(db, key):
-    return 100 * db.get(key, "haplotag_accuracy")
+def read_precision_pct(db, key):
+    return 100 * db.get(key, "read_precision")
+
+
+def read_recall_pct(db, key):
+    return 100 * db.get(key, "read_recall")
 
 
 def fnr_pct(db, key):
@@ -215,8 +221,8 @@ def fig1b(db, ctx, ref):
 
 
 def fig1c(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig1c_phased_fraction_by_platform_" + ref, ref,
-                          phased_pct, "Phased het SNPs (%)", "platform")
+    return coverage_lines(db, ctx, "fig1c_truth_phased_by_platform_" + ref, ref,
+                          truth_phased_pct, "Truth het SNPs phased (%)", "platform")
 
 
 def fig2a(db, ctx, ref):
@@ -235,8 +241,15 @@ def fig7a(db, ctx, ref):
 
 
 def fig7b(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig7b_haplotag_accuracy_" + ref, ref,
-                          haplotag_pct, "Read haplotag agreement\nwith truth (%)", "platform")
+    return coverage_lines(db, ctx, "fig7b_read_precision_" + ref, ref,
+                          read_precision_pct,
+                          "Reads on the truth haplotype,\nof reads tagged by both (%)", "platform")
+
+
+def fig7c(db, ctx, ref):
+    return coverage_lines(db, ctx, "fig7c_read_recall_" + ref, ref,
+                          read_recall_pct,
+                          "Reads on the truth haplotype,\nof reads tagged by the truth (%)", "platform")
 
 
 # ------------------------------------------------ accuracy against contiguity: 3
@@ -748,6 +761,7 @@ FIGURES = [
     ("fig6c", fig6c, False),
     ("fig7a", fig7a, True),
     ("fig7b", fig7b, True),
+    ("fig7c", fig7c, True),
     ("fig8", fig8, True),
     ("figS1", figS1, True),
 ]
