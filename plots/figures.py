@@ -388,14 +388,25 @@ def figS1(db, ctx, ref, caller="truth"):
 
 # ------------------------------------------------------------------- heatmaps
 
-def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, **image):
+def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, label=None, **image):
     """Rows and columns come in labelled groups; a cell with no value is
-    hatched, never painted as a low value."""
+    hatched, never painted as a low value. label(value) -> text writes the
+    value into each cell, in ink or white, whichever reads on that colour."""
     arr = np.ma.masked_invalid(np.asarray(matrix, dtype=float))
     nrow, ncol = arr.shape
     ax.add_patch(Rectangle((-0.5, -0.5), ncol, nrow, facecolor="white",
                            edgecolor=st.MISSING, hatch="//////", linewidth=0, zorder=0))
     im = ax.imshow(arr, aspect="auto", interpolation="nearest", zorder=1, **image)
+
+    if label is not None:
+        for r in range(nrow):
+            for c in range(ncol):
+                if arr.mask[r, c] if np.ndim(arr.mask) else False:
+                    continue
+                red, green, blue, _ = im.cmap(im.norm(arr[r, c]))
+                dark = 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5
+                ax.text(c, r, label(arr[r, c]), ha="center", va="center", zorder=3,
+                        color="white" if dark else st.INK)
 
     row_edges = set(np.cumsum([n for _, n in row_groups])[:-1])
     col_edges = set(np.cumsum([n for _, n in col_groups])[:-1])
@@ -438,6 +449,8 @@ def colorbar(fig, im, ax, label):
     bar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.015, aspect=22)
     bar.set_label(label)
     bar.outline.set_visible(False)
+    if isinstance(im.norm, LogNorm):
+        bar.ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
     bar.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
     bar.ax.yaxis.set_minor_locator(NullLocator())
     bar.ax.tick_params(length=2)
@@ -467,21 +480,68 @@ def fig5b(db, ctx, ref):
                           "Called het SNPs not in truth\n(FDR, %)", "caller", log=True, caller="called")
 
 
-def fig5c(db, ctx, ref):
-    """The whole grid on one colour scale. That is only fair because every cell
-    is a share of the same truth het SNPs."""
+def short_number(v):
+    """Two significant figures at most, so a value fits its cell."""
+    if v < 0.1:
+        return "%.2f" % v
+    return "%.1f" % v if v < 10 else "%.0f" % v
+
+
+def grid_heatmap(db, ctx, ref, name, value, bar_label):
+    """The whole grid of one reference - caller x phaser down, platform x depth
+    across - on one log colour scale, every cell labelled with its value.
+    Only for metrics whose denominator does not depend on the caller."""
     keys, row_labels, col_labels, row_groups, col_groups = grid_cells(ref)
-    matrix = [[recall_pct(db, k) for k in row] for row in keys]
+    matrix = [[positive(value(db, k)) for k in row] for row in keys]
     values = [v for row in matrix for v in row if finite(v)]
     if not values:
         raise NoData("no rows for %s" % ref)
 
     fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * st.MM, 92 * st.MM), constrained_layout=True)
     im = heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups,
-                 cmap=st.SEQUENTIAL, vmin=min(values), vmax=max(values))
+                 label=short_number, cmap=st.SEQUENTIAL, norm=log_norm(values))
     ax.set_xlabel("Coverage (×)")
-    colorbar(fig, im, ax, "Truth het SNPs called and phased correctly (%)")
-    return save(fig, ctx, "fig5c_truth_phased_correctly_all_callers_" + ref)
+    colorbar(fig, im, ax, bar_label)
+    return save(fig, ctx, name + "_" + ref)
+
+
+def truth_lost_pct(db, key):
+    """Truth het SNPs not called, or called and phased wrong. Kept shares sit
+    between 95 and 99.9%, and only their complement on a log scale spreads
+    them apart."""
+    return 100 - recall_pct(db, key)
+
+
+def phasing_lost_pct(db, key):
+    """Truth het SNPs the caller did find but that were left unphased or
+    phased wrong - what the phaser lost, on the truth denominator."""
+    return 100 * ratio(db.get(key, "shared") - db.get(key, "correct"), db.get(key, "truth_total"))
+
+
+def reads_lost_pct(db, key):
+    """Reads tagged by the truth that this run left untagged or put on the
+    wrong haplotype; every run of a cell has the same reads."""
+    return 100 - read_recall_pct(db, key)
+
+
+def fig5c(db, ctx, ref):
+    return grid_heatmap(db, ctx, ref, "fig5c_truth_lost_all_callers", truth_lost_pct,
+                        "Truth het SNPs not called or phased wrongly (%)")
+
+
+def figS2a(db, ctx, ref):
+    return grid_heatmap(db, ctx, ref, "figS2a_phasing_lost_all_callers", phasing_lost_pct,
+                        "Called truth het SNPs left unphased\nor phased wrongly (% of truth)")
+
+
+def figS2b(db, ctx, ref):
+    return grid_heatmap(db, ctx, ref, "figS2b_block_ng50_all_callers", n50_mb,
+                        "Phase block NG50 (Mb)")
+
+
+def figS2c(db, ctx, ref):
+    return grid_heatmap(db, ctx, ref, "figS2c_reads_lost_all_callers", reads_lost_pct,
+                        "Truth-tagged reads not assigned\nto their haplotype (%)")
 
 
 def figS0(db, ctx, ref):
@@ -754,6 +814,9 @@ FIGURES = [
     ("fig5a", fig5a, True),
     ("fig5b", fig5b, True),
     ("fig5c", fig5c, True),
+    ("figS2a", figS2a, True),
+    ("figS2b", figS2b, True),
+    ("figS2c", figS2c, True),
     ("fig5d", fig5d, True),
     ("fig5e", fig5e, True),
     ("fig6a", fig6a, False),
