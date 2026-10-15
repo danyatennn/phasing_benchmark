@@ -6,10 +6,16 @@ Which denominators are shared, and so what may be compared with what:
                                     switch rate, N50 and phased fraction compare
                                     directly (fig1-fig4, fig7, figS1)
   callers                           each caller hands the phaser its own sites,
-                                    so the switch rate is conditional on what was
-                                    called (fig5a). The comparable numbers are
-                                    the ones over truth_total, which is one
-                                    constant per reference (fig5b)
+                                    so its switch rate is over a different set
+                                    of sites and is never shown caller against
+                                    caller on its own. Callers are compared on
+                                    what is divided by truth_total, one constant
+                                    per reference: FNR, and truth het SNPs
+                                    phased correctly (fig5a, fig5c, fig5d). FDR
+                                    is over the caller's own calls, as precision
+                                    always is (fig5b). The switch rate appears
+                                    only against the share of the truth it was
+                                    measured on (fig5e)
   references                        truth_total differs between GRCh38 and T2T,
                                     so only rates are put side by side (fig6)
 """
@@ -103,6 +109,11 @@ def platform_handles(line=True):
             for p in st.PLATFORMS]
 
 
+def caller_handles(callers, line=True):
+    return [series_handle(st.CALLER_COLOR[c], st.CALLER_MARKER[c], st.CALLER_LABEL[c], line)
+            for c in callers]
+
+
 def top_legend(legend_ax, handles, **kwargs):
     legend_ax.legend(handles=handles, loc="center", ncol=len(handles),
                      borderaxespad=0, **kwargs)
@@ -112,8 +123,15 @@ def top_legend(legend_ax, handles, **kwargs):
 
 def coverage_lines(db, ctx, name, ref, value, ylabel, by, log=False, caller="truth"):
     """by='platform': a panel per platform, a line per phaser.
-       by='phaser':   a panel per phaser, a line per platform."""
-    if by == "platform":
+       by='phaser':   a panel per phaser, a line per platform.
+       by='caller':   a panel per platform, a line per caller - for what the
+                      caller alone decides, so the phaser is not a dimension."""
+    if by == "caller":
+        panels, series = st.PLATFORMS, [c for c in st.CALLERS if c != "truth"]
+        panel_label, color, marker = st.PLATFORM_LABEL, st.CALLER_COLOR, st.CALLER_MARKER
+        handles = caller_handles(series)
+        key = lambda panel, s, depth: db.widest(ref, s, panel, depth, st.PHASERS)
+    elif by == "platform":
         panels, series = st.PLATFORMS, st.PHASERS
         panel_label, color, marker = st.PLATFORM_LABEL, st.PHASER_COLOR, st.PHASER_MARKER
         handles = phaser_handles()
@@ -176,6 +194,14 @@ def tagged_pct(db, key):
 
 def haplotag_pct(db, key):
     return 100 * db.get(key, "haplotag_accuracy")
+
+
+def fnr_pct(db, key):
+    return 100 * db.get(key, "fnr")
+
+
+def fdr_pct(db, key):
+    return 100 * db.get(key, "fdr")
 
 
 def fig1a(db, ctx, ref):
@@ -419,18 +445,30 @@ def grid_cells(ref):
 
 
 def fig5a(db, ctx, ref):
+    return coverage_lines(db, ctx, "fig5a_caller_fnr_" + ref, ref, fnr_pct,
+                          "Truth het SNPs missed (FNR, %)", "caller", log=True, caller="called")
+
+
+def fig5b(db, ctx, ref):
+    return coverage_lines(db, ctx, "fig5b_caller_fdr_" + ref, ref, fdr_pct,
+                          "Called het SNPs not in truth\n(FDR, %)", "caller", log=True, caller="called")
+
+
+def fig5c(db, ctx, ref):
+    """The whole grid on one colour scale. That is only fair because every cell
+    is a share of the same truth het SNPs."""
     keys, row_labels, col_labels, row_groups, col_groups = grid_cells(ref)
-    matrix = [[positive(switch_pct(db, k)) for k in row] for row in keys]
+    matrix = [[recall_pct(db, k) for k in row] for row in keys]
     values = [v for row in matrix for v in row if finite(v)]
     if not values:
         raise NoData("no rows for %s" % ref)
 
     fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * st.MM, 92 * st.MM), constrained_layout=True)
     im = heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups,
-                 cmap=st.SEQUENTIAL, norm=log_norm(values))
+                 cmap=st.SEQUENTIAL, vmin=min(values), vmax=max(values))
     ax.set_xlabel("Coverage (×)")
-    colorbar(fig, im, ax, "Switch error rate (%)")
-    return save(fig, ctx, "fig5a_switch_rate_all_callers_" + ref)
+    colorbar(fig, im, ax, "Truth het SNPs called and phased correctly (%)")
+    return save(fig, ctx, "fig5c_truth_phased_correctly_all_callers_" + ref)
 
 
 def figS0(db, ctx, ref):
@@ -504,7 +542,7 @@ def stratum_label(name):
 
 # ------------------------------------------- callers over one denominator: 5b
 
-def fig5b(db, ctx, ref):
+def fig5d(db, ctx, ref):
     """Both ends of a bar are fractions of the same truth het SNPs: the open end
     is what the caller found, the filled end what was also phased correctly. The
     gap is what phasing lost; the distance of the open end from 100 is what
@@ -557,7 +595,53 @@ def fig5b(db, ctx, ref):
         Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
                markeredgecolor="white", label="Called and phased correctly, %d×" % depth),
     ])
-    return save(fig, ctx, "fig5b_truth_recovered_%dx" % depth + "_" + ref)
+    return save(fig, ctx, "fig5d_truth_recovered_%dx" % depth + "_" + ref)
+
+
+def fig5e(db, ctx, ref):
+    """The switch rate of a caller is measured on the sites that caller found
+    and the phaser phased, so it is drawn against how much of the truth that
+    was. A caller that skips the hard sites moves down and to the left, and
+    the move to the left is visible."""
+    depth = ctx.depth
+    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), sharex=True)
+    ys_all = []
+    for ax, platform in zip(axes, st.PLATFORMS):
+        here = 0
+        for caller in st.CALLERS:
+            for phaser in st.PHASERS:
+                key = (ref, caller, platform, depth, phaser)
+                x = 100 * ratio(db.get(key, "covered"), db.get(key, "truth_total"))
+                y = positive(switch_pct(db, key))
+                if not (finite(x) and finite(y)):
+                    continue
+                ax.scatter([x], [y], s=20, color=st.CALLER_COLOR[caller],
+                           marker=st.PHASER_MARKER[phaser], edgecolor="white",
+                           linewidth=0.5, zorder=3)
+                ys_all.append(y)
+                here += 1
+        ax.set_title(st.PLATFORM_LABEL[platform])
+        ax.set_xlabel("Truth het SNPs phased (%)")
+        ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
+        ax.set_axisbelow(True)
+        if not here:
+            empty_panel(ax)
+    if not ys_all:
+        plt.close(fig)
+        raise NoData("no rows for %s at %d×" % (ref, depth))
+
+    axes[0].set_yscale("log")
+    log_ticks(axes[0].yaxis, min(ys_all), max(ys_all))
+    axes[0].set_ylabel("Switch error rate on\nthose sites (%%), %d×" % depth)
+    shapes = [Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor="white",
+                     markeredgecolor=st.INK, markeredgewidth=0.7, label=st.PHASER_LABEL[p])
+              for p in st.PHASERS]
+    # colour says caller here and shape says phaser, so the caller entries are
+    # plain dots rather than the callers' own line markers
+    colours = [Line2D([], [], color="none", marker="o", markerfacecolor=st.CALLER_COLOR[c],
+                      markeredgecolor="white", label=st.CALLER_LABEL[c]) for c in st.CALLERS]
+    top_legend(legend_ax, colours + shapes)
+    return save(fig, ctx, "fig5e_switch_rate_vs_truth_phased_%dx" % depth + "_" + ref)
 
 
 # ------------------------------------------------------ GRCh38 against T2T: 6
@@ -656,6 +740,9 @@ FIGURES = [
     ("fig4", fig4, True),
     ("fig5a", fig5a, True),
     ("fig5b", fig5b, True),
+    ("fig5c", fig5c, True),
+    ("fig5d", fig5d, True),
+    ("fig5e", fig5e, True),
     ("fig6a", fig6a, False),
     ("fig6b", fig6b, False),
     ("fig6c", fig6c, False),

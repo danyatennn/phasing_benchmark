@@ -131,6 +131,13 @@ class Metrics:
     def has(self, key):
         return key in self.rows
 
+    def widest(self, ref, caller, platform, depth, phasers):
+        """What a caller found does not depend on the phaser, but a phaser may
+        drop records. The run that kept the most sites stands for the cell."""
+        keys = [(ref, caller, platform, depth, p) for p in phasers]
+        keys = [k for k in keys if k in self.rows and math.isfinite(self.rows[k]["emitted"])]
+        return max(keys, key=lambda k: self.rows[k]["emitted"]) if keys else None
+
     def count(self, ref, state):
         return sum(1 for k, s in self.status.items() if k[0] == ref and s == state)
 

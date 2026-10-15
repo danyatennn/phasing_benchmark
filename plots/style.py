@@ -7,6 +7,8 @@ panel of every figure, and the two families never share a hue:
   phasers    crimson, navy, amber, sky - checked pairwise under protan, deutan
              and tritan simulation (min OKLab dE 12), and each also has its own
              marker so identity never rests on colour alone
+  callers    dark green, orchid, lime, separated by lightness as much as by hue
+             (min dE 8); the GIAB truth is grey, it is the reference, not a caller
 """
 
 import os
@@ -66,6 +68,14 @@ PHASER_COLOR = {
     "hapcut2": "#6FA8DC",
 }
 PHASER_MARKER = {"whatshap": "o", "longphase": "s", "margin": "^", "hapcut2": "D"}
+
+CALLER_COLOR = {
+    "truth": "#9A9A9A",
+    "clair3": "#1E5631",
+    "deepvariant": "#C2559D",
+    "longcalld": "#A8B536",
+}
+CALLER_MARKER = {"truth": "o", "clair3": "v", "deepvariant": "P", "longcalld": "X"}
 
 INK = "#222222"
 MUTED = "#7A7A7A"
