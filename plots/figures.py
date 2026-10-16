@@ -115,8 +115,8 @@ def caller_handles(callers, line=True):
 
 
 def top_legend(legend_ax, handles, **kwargs):
-    legend_ax.legend(handles=handles, loc="center", ncol=len(handles),
-                     borderaxespad=0, **kwargs)
+    kwargs.setdefault("ncol", len(handles))
+    legend_ax.legend(handles=handles, loc="center", borderaxespad=0, **kwargs)
 
 
 # ------------------------------------------------- lines over coverage: 1, 2, 7
@@ -793,14 +793,224 @@ def recall_pct(db, key):
     return 100 * db.get(key, "recall_phased")
 
 
-def fig6a(db, ctx):
-    return reference_scatter(db, ctx, "fig6a_reference_switch_rate",
-                             switch_pct, "Switch error rate (%)", log=True)
+# A difference of 10% between the references is invisible on a log-log plot
+# that spans two decades, so every version below has the ratio T2T / GRCh38 of
+# the same run on its own axis next to it.
+#   pooled      one panel, colour and shape are the phaser
+#   technology  ONT and PacBio side by side, colour is the platform
+#   platform    one panel, colour and shape are the platform, and the ratios
+#               as a strip per platform, where a shift of one platform shows
+
+RATIO_TICKS = [0.25, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 2, 4]
+TECHNOLOGIES = [("ONT", ["ont4k", "ont5k"]), ("PacBio", ["hifi", "revio"])]
 
 
-def fig6b(db, ctx):
-    return reference_scatter(db, ctx, "fig6b_reference_block_n50",
-                             n50_mb, "Phase block NG50 (Mb)", log=True)
+def reference_pairs(db, value, platforms, phasers):
+    """(GRCh38, T2T) for every run computed on both, by (platform, phaser)."""
+    a, b = st.REFERENCES[0], st.REFERENCES[1]
+    pairs = {}
+    for platform in platforms:
+        for phaser in phasers:
+            pts = []
+            for caller in st.CALLERS:
+                for depth in st.DEPTHS:
+                    x = positive(value(db, (a, caller, platform, depth, phaser)))
+                    y = positive(value(db, (b, caller, platform, depth, phaser)))
+                    if finite(x) and finite(y):
+                        pts.append((x, y))
+            if pts:
+                pairs[(platform, phaser)] = pts
+    return pairs
+
+
+def median_ratio(pts):
+    return float(np.median([y / x for x, y in pts]))
+
+
+def identity_axes(ax, lo, hi, label):
+    a, b = st.REFERENCES[0], st.REFERENCES[1]
+    ax.plot([lo, hi], [lo, hi], color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    log_ticks(ax.xaxis, lo, hi)
+    log_ticks(ax.yaxis, lo, hi)
+    ax.set_ylabel("%s, %s" % (label, st.REFERENCE_LABEL[b]))
+    ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
+    ax.set_axisbelow(True)
+
+
+def ratio_axis(ax, ratios):
+    """Log ratio, symmetric about 1, with the +-10% band shaded."""
+    a, b = st.REFERENCES[0], st.REFERENCES[1]
+    span = max(abs(math.log10(r)) for r in ratios)
+    span = max(span * 1.15, math.log10(1.25))
+    ax.set_yscale("log")
+    ax.set_ylim(10 ** -span, 10 ** span)
+    ax.axhspan(1 / 1.1, 1.1, color=st.GRID, linewidth=0, zorder=0)
+    ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
+    ax.set_yticks([t for t in RATIO_TICKS if 10 ** -span <= t <= 10 ** span])
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    ax.yaxis.set_minor_locator(NullLocator())
+    ax.set_ylabel("%s / %s" % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
+
+
+def reference_columns(db, ctx, name, value, label, columns, style_of, handles_of):
+    """columns: [(title, [(platform, phaser), ...])]; a log-log panel over its
+    ratio panel for each column. style_of(platform, phaser) -> colour, marker."""
+    a = st.REFERENCES[0]
+    pairs = reference_pairs(db, value, st.PLATFORMS, st.PHASERS)
+    if not pairs:
+        raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
+    seen = [v for pts in pairs.values() for p in pts for v in p]
+    lo, hi = min(seen) / 1.3, max(seen) * 1.3
+    ratios = [y / x for pts in pairs.values() for x, y in pts]
+
+    n = len(columns)
+    fig = plt.figure(figsize=((40 + 70 * n) * st.MM, (118 + 6 * (n > 1)) * st.MM),
+                     constrained_layout=True)
+    grid = fig.add_gridspec(3, n, height_ratios=[0.1 + 0.08 * (n > 1), 1, 0.55])
+    legend_ax = fig.add_subplot(grid[0, :])
+    legend_ax.axis("off")
+    first_top = first_bottom = None
+    for i, (column_title, cells) in enumerate(columns):
+        top = fig.add_subplot(grid[1, i], sharex=first_top, sharey=first_top)
+        bottom = fig.add_subplot(grid[2, i], sharex=top, sharey=first_bottom)
+        first_top, first_bottom = first_top or top, first_bottom or bottom
+        for platform, phaser in cells:
+            pts = pairs.get((platform, phaser))
+            if not pts:
+                continue
+            color, marker = style_of(platform, phaser)
+            xs, ys = zip(*pts)
+            for ax, yv in ((top, ys), (bottom, [y / x for x, y in pts])):
+                ax.scatter(xs, yv, s=12, color=color, marker=marker, edgecolor="white",
+                           linewidth=0.4, alpha=0.9, zorder=3)
+        identity_axes(top, lo, hi, label)
+        ratio_axis(bottom, ratios)
+        bottom.set_xlabel("%s, %s" % (label, st.REFERENCE_LABEL[a]))
+        bottom.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
+        top.tick_params(labelbottom=False)
+        if column_title:
+            top.set_title(column_title)
+        if i:
+            top.tick_params(labelleft=False)
+            bottom.tick_params(labelleft=False)
+            top.set_ylabel("")
+            bottom.set_ylabel("")
+    handles = handles_of(pairs)
+    top_legend(legend_ax, handles, ncol=min(len(handles), 4))
+    return save(fig, ctx, name)
+
+
+def labelled(handle, pts_list):
+    """A legend entry with the median ratio of its runs."""
+    pts = [p for pts in pts_list for p in pts]
+    if pts:
+        handle.set_label("%s  %.2f×" % (handle.get_label(), median_ratio(pts)))
+    return handle
+
+
+def reference_pooled(db, ctx, name, value, label):
+    cells = [(pl, ph) for pl in st.PLATFORMS for ph in st.PHASERS]
+    return reference_columns(
+        db, ctx, name, value, label, [("", cells)],
+        lambda pl, ph: (st.PHASER_COLOR[ph], st.PHASER_MARKER[ph]),
+        lambda pairs: [labelled(h, [pairs.get((pl, ph), []) for pl in st.PLATFORMS])
+                       for h, ph in zip(phaser_handles(line=False), st.PHASERS)])
+
+
+def reference_technology(db, ctx, name, value, label):
+    columns = [(tech, [(pl, ph) for pl in platforms for ph in st.PHASERS])
+               for tech, platforms in TECHNOLOGIES]
+    phaser_shapes = [Line2D([], [], color="none", marker=st.PHASER_MARKER[p],
+                            markerfacecolor=st.MUTED, markeredgecolor="white",
+                            label=st.PHASER_LABEL[p]) for p in st.PHASERS]
+    return reference_columns(
+        db, ctx, name, value, label, columns,
+        lambda pl, ph: (st.PLATFORM_COLOR[pl], st.PHASER_MARKER[ph]),
+        lambda pairs: [labelled(h, [pairs.get((pl, ph), []) for ph in st.PHASERS])
+                       for h, pl in zip(platform_handles(line=False), st.PLATFORMS)]
+        + phaser_shapes)
+
+
+def reference_platform(db, ctx, name, value, label):
+    """Colour and shape both say platform; the right panel puts each platform's
+    ratios in a column of its own, a bar at the median."""
+    a = st.REFERENCES[0]
+    pairs = reference_pairs(db, value, st.PLATFORMS, st.PHASERS)
+    if not pairs:
+        raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
+    seen = [v for pts in pairs.values() for p in pts for v in p]
+    lo, hi = min(seen) / 1.3, max(seen) * 1.3
+
+    fig = plt.figure(figsize=(150 * st.MM, 78 * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 2, height_ratios=[0.1, 1], width_ratios=[1, 0.8])
+    legend_ax = fig.add_subplot(grid[0, :])
+    legend_ax.axis("off")
+    ax = fig.add_subplot(grid[1, 0])
+    strip = fig.add_subplot(grid[1, 1])
+    rng = np.random.RandomState(0)
+    ratios = []
+    for i, platform in enumerate(st.PLATFORMS):
+        pts = [p for ph in st.PHASERS for p in pairs.get((platform, ph), [])]
+        if not pts:
+            continue
+        color, marker = st.PLATFORM_COLOR[platform], st.PLATFORM_MARKER[platform]
+        xs, ys = zip(*pts)
+        ax.scatter(xs, ys, s=12, color=color, marker=marker, edgecolor="white",
+                   linewidth=0.4, alpha=0.9, zorder=3)
+        r = [y / x for x, y in pts]
+        ratios.extend(r)
+        strip.scatter(i + rng.uniform(-0.22, 0.22, len(r)), r, s=9, color=color, marker=marker,
+                      edgecolor="white", linewidth=0.3, alpha=0.9, zorder=3)
+        med = float(np.median(r))
+        strip.plot([i - 0.32, i + 0.32], [med, med], color=st.INK, linewidth=1.0, zorder=4)
+        strip.annotate("%.2f×" % med, xy=(i, 1), xycoords=strip.get_xaxis_transform(),
+                       xytext=(0, 2), textcoords="offset points", ha="center", va="bottom")
+    identity_axes(ax, lo, hi, label)
+    ax.set_xlabel("%s, %s" % (label, st.REFERENCE_LABEL[a]))
+    ratio_axis(strip, ratios)
+    strip.set_xticks(range(len(st.PLATFORMS)))
+    strip.set_xticklabels([st.PLATFORM_LABEL[p] for p in st.PLATFORMS],
+                          rotation=35, ha="right", rotation_mode="anchor")
+    strip.set_xlim(-0.6, len(st.PLATFORMS) - 0.4)
+    strip.tick_params(axis="x", length=0)
+    top_legend(legend_ax, platform_handles(line=False))
+    return save(fig, ctx, name)
+
+
+SER_LABEL = "Switch error rate (%)"
+NG50_LABEL = "Phase block NG50 (Mb)"
+
+
+def fig6a1(db, ctx):
+    return reference_pooled(db, ctx, "fig6a1_reference_switch_rate_pooled", switch_pct, SER_LABEL)
+
+
+def fig6a2(db, ctx):
+    return reference_technology(db, ctx, "fig6a2_reference_switch_rate_by_technology",
+                                switch_pct, SER_LABEL)
+
+
+def fig6a3(db, ctx):
+    return reference_platform(db, ctx, "fig6a3_reference_switch_rate_by_platform",
+                              switch_pct, SER_LABEL)
+
+
+def fig6b1(db, ctx):
+    return reference_pooled(db, ctx, "fig6b1_reference_block_ng50_pooled", n50_mb, NG50_LABEL)
+
+
+def fig6b2(db, ctx):
+    return reference_technology(db, ctx, "fig6b2_reference_block_ng50_by_technology",
+                                n50_mb, NG50_LABEL)
+
+
+def fig6b3(db, ctx):
+    return reference_platform(db, ctx, "fig6b3_reference_block_ng50_by_platform",
+                              n50_mb, NG50_LABEL)
 
 
 def fig6c(db, ctx):
@@ -826,8 +1036,12 @@ FIGURES = [
     ("figS2c", figS2c, True),
     ("fig5d", fig5d, True),
     ("fig5e", fig5e, True),
-    ("fig6a", fig6a, False),
-    ("fig6b", fig6b, False),
+    ("fig6a1", fig6a1, False),
+    ("fig6a2", fig6a2, False),
+    ("fig6a3", fig6a3, False),
+    ("fig6b1", fig6b1, False),
+    ("fig6b2", fig6b2, False),
+    ("fig6b3", fig6b3, False),
     ("fig6c", fig6c, False),
     ("fig7a", fig7a, True),
     ("fig7b", fig7b, True),
