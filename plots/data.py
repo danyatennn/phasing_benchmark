@@ -217,3 +217,20 @@ class Metrics:
                 row = None
             self._strata[cache_key] = row
         return self._strata[cache_key]
+
+    # regions_statistics.sh: what each stratum is, one row per stratum
+    def strata_statistics(self, ref):
+        path = os.path.join(self.strata_dir, "regions_statistics_%s.tsv" % ref)
+        return {line["stratum"]: {k: (v if k in LABEL_COLUMNS or k == "category" else num(v))
+                                  for k, v in line.items()}
+                for line in _read_table(path) if line.get("stratum")}
+
+    def strata_overlap(self, ref):
+        """(a, b) -> Jaccard index of the two strata, both orders."""
+        path = os.path.join(self.strata_dir, "jaccard_%s.tsv" % ref)
+        pairs = {}
+        for line in _read_table(path):
+            a, b, j = line.get("stratum_a"), line.get("stratum_b"), num(line.get("jaccard"))
+            if a and b and math.isfinite(j):
+                pairs[(a, b)] = pairs[(b, a)] = j
+        return pairs

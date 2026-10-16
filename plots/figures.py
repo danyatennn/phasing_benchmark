@@ -597,7 +597,7 @@ def fig8(db, ctx, ref, caller="truth"):
                  [st.PHASER_LABEL[p] for _, p in cols],
                  [("", len(strata))],
                  [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
-                 cmap=st.SEQUENTIAL, norm=log_norm(values))
+                 label=short_number, cmap=st.SEQUENTIAL, norm=log_norm(values))
     plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
     colorbar(fig, im, ax, "Switch error rate (%%), %d×" % depth)
     return save(fig, ctx, "fig8_switch_rate_by_stratum_%dx_%s" % (depth, ref))
@@ -617,6 +617,206 @@ STRATUM_LABEL = {
 
 def stratum_label(name):
     return STRATUM_LABEL.get(name, name.replace("_", " "))
+
+
+# ------------------------------------- what the strata are: S3, one file each
+#
+# metrics_strata/regions_statistics_<ref>.tsv from regions_statistics.sh. Every
+# number is inside the confident BED unless it says raw, i.e. over what the
+# per-stratum metrics are computed on.
+
+STRATA_DARK = "#4A5C70"
+STRATA_LIGHT = "#B9C4CF"
+
+
+def strata_rows(db, ref):
+    stats = db.strata_statistics(ref)
+    names = [s for s in db.strata_names() if s in stats]
+    if not names:
+        raise NoData("no metrics_strata/regions_statistics_%s.tsv - regions_statistics.sh has not run" % ref)
+    return names, stats
+
+
+def strata_axes(n, legend=0):
+    """legend: how many rows of legend go on top."""
+    height = 16 + 6.5 * n + 5 * legend
+    if legend:
+        return legend_panel(92, height, legend_rows=legend)
+    fig, ax = plt.subplots(figsize=(92 * st.MM, height * st.MM), constrained_layout=True)
+    return fig, None, ax
+
+
+def strata_y(ax, names):
+    ax.set_yticks(range(len(names)))
+    ax.set_yticklabels([stratum_label(s) for s in names])
+    ax.set_ylim(len(names) - 0.4, -0.6)
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
+    ax.set_axisbelow(True)
+
+
+def thousands(v):
+    return "{:,}".format(int(round(v)))
+
+
+def figS3a(db, ctx, ref):
+    """Each stratum before and after the confident BED: the dark bar is what
+    the benchmark sees, the number how much of the stratum that is."""
+    names, stats = strata_rows(db, ref)
+    raw = [positive(stats[s]["bp_raw"] / 1e6) for s in names]
+    kept = [positive(stats[s]["bp"] / 1e6) for s in names]
+    values = [v for v in raw + kept if finite(v)]
+    if not values:
+        raise NoData("no stratum sizes for %s" % ref)
+    left = 10 ** math.floor(math.log10(min(values) / 2))
+    fig, legend_ax, ax = strata_axes(len(names), legend=1)
+    for i, (r, k) in enumerate(zip(raw, kept)):
+        if finite(r):
+            ax.barh(i, r - left, left=left, height=0.7, color=STRATA_LIGHT, zorder=2)
+        if finite(k):
+            ax.barh(i, k - left, left=left, height=0.7, color=STRATA_DARK, zorder=3)
+        if finite(r) and finite(k):
+            ax.text(max(r, k) * 1.15, i, "%.0f%%" % (100 * k / r), va="center", color=st.INK)
+    ax.set_xscale("log")
+    ax.set_xlim(left, max(values) * 4)
+    log_ticks(ax.xaxis, left, max(values) * 4)
+    ax.set_xlabel("Size (Mb)")
+    strata_y(ax, names)
+    top_legend(legend_ax, [Patch(facecolor=STRATA_LIGHT, label="Whole stratum"),
+                           Patch(facecolor=STRATA_DARK, label="Inside the confident regions")])
+    return save(fig, ctx, "figS3a_strata_size_" + ref)
+
+
+def figS3b(db, ctx, ref):
+    """Density of the truth het SNPs, with how many there are: a rate over a
+    few thousand sites is not as firm as one over a million."""
+    names, stats = strata_rows(db, ref)
+    density = [stats[s]["het_snps_per_mb"] for s in names]
+    count = [stats[s]["truth_het_snps"] for s in names]
+    total = NAN
+    if "alldifficultregions" in stats and "notinalldifficultregions" in stats:
+        total = stats["alldifficultregions"]["truth_het_snps"] + \
+            stats["notinalldifficultregions"]["truth_het_snps"]
+    if not any(finite(v) for v in density):
+        raise NoData("no het SNP density for %s" % ref)
+    fig, _, ax = strata_axes(len(names))
+    top = max(v for v in density if finite(v))
+    for i, (d, n) in enumerate(zip(density, count)):
+        if not finite(d):
+            continue
+        ax.barh(i, d, height=0.7, color=STRATA_DARK, zorder=3)
+        text = thousands(n)
+        if finite(total) and total:
+            text += " (%s%%)" % short_number(100 * n / total)
+        ax.text(d + top * 0.02, i, text, va="center", color=st.INK)
+    ax.set_xlim(0, top * 1.6)
+    ax.set_xlabel("Truth het SNPs per Mb")
+    strata_y(ax, names)
+    return save(fig, ctx, "figS3b_strata_het_snps_" + ref)
+
+
+COMPOSITION = [
+    ("Het SNP, benchmarked", "#2C3A4B"),
+    ("Het indel or multiallelic", "#6D7F92"),
+    ("Hom alt", "#B9C4CF"),
+    ("Hemizygous", "#DDE3E9"),
+    ("Other", "#F4F6F8"),
+]
+
+
+def figS3c(db, ctx, ref):
+    """Every variant of the GIAB truth in the stratum, split by what the
+    benchmark does with it. Only the darkest part is scored; the rest is
+    variation the per-stratum numbers say nothing about."""
+    names, stats = strata_rows(db, ref)
+    fig, legend_ax, ax = strata_axes(len(names), legend=3)
+    drawn = 0
+    for i, s in enumerate(names):
+        r = stats[s]
+        total = r["src_variants"]
+        if not (finite(total) and total > 0):
+            continue
+        bench = r["truth_het_snps"]
+        parts = [bench, max(r["src_0_1"] + r["src_1_2"] - bench, 0),
+                 r["src_1_1"], r["src_hemi"], r["src_other"]]
+        left = 0.0
+        for v, (_, color) in zip(parts, COMPOSITION):
+            share = 100 * v / total if finite(v) else 0
+            ax.barh(i, share, left=left, height=0.7, color=color,
+                    edgecolor="white", linewidth=0.4, zorder=3)
+            left += share
+        ax.text(101.5, i, "%.0f%%" % (100 * bench / total), va="center", color=st.INK)
+        drawn += 1
+    if not drawn:
+        plt.close(fig)
+        raise NoData("no truth composition for %s" % ref)
+    ax.set_xlim(0, 112)
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xlabel("GIAB truth variants in the stratum (%)")
+    strata_y(ax, names)
+    top_legend(legend_ax, [Patch(facecolor=c, edgecolor=st.GRID, linewidth=0.4, label=l)
+                           for l, c in COMPOSITION], ncol=2)
+    return save(fig, ctx, "figS3c_strata_composition_" + ref)
+
+
+def strata_dots(db, ctx, ref, name, column, scale, xlabel, fmt, log):
+    names, stats = strata_rows(db, ref)
+    values = [scale * stats[s][column] for s in names]
+    values = [positive(v) if log else v for v in values]
+    if not any(finite(v) for v in values):
+        raise NoData("no %s for %s" % (column, ref))
+    fig, _, ax = strata_axes(len(names))
+    for i, v in enumerate(values):
+        if not finite(v):
+            continue
+        ax.plot(v, i, marker="o", color=STRATA_DARK, markeredgecolor="white", zorder=3)
+        ax.annotate(fmt(v), xy=(v, i), xytext=(5, 0), textcoords="offset points",
+                    va="center", color=st.INK)
+    shown = [v for v in values if finite(v)]
+    if log:
+        ax.set_xscale("log")
+        lo, hi = min(shown) / 2, max(shown) * 4
+        ax.set_xlim(lo, hi)
+        log_ticks(ax.xaxis, lo, hi)
+    else:
+        ax.set_xlim(0, max(shown) * 1.35)
+    ax.set_xlabel(xlabel)
+    strata_y(ax, names)
+    return save(fig, ctx, name + "_" + ref)
+
+
+def figS3d(db, ctx, ref):
+    """Phase blocks break where het SNPs are sparse: the typical gap."""
+    return strata_dots(db, ctx, ref, "figS3d_strata_snp_spacing", "median_inter_snp_dist", 1,
+                       "Median distance to the next\ntruth het SNP (bp)", thousands, log=True)
+
+
+def figS3e(db, ctx, ref):
+    """SNPs this close share most reads, and a read error there touches both."""
+    return strata_dots(db, ctx, ref, "figS3e_strata_close_snps", "frac_snp_within_50bp", 100,
+                       "Truth het SNPs less than 50 bp\nfrom the next one (%)",
+                       lambda v: short_number(v), log=False)
+
+
+def figS3f(db, ctx, ref):
+    """How much the strata are the same sequence: Jaccard index of each pair
+    inside the confident regions. Nested strata are not independent results."""
+    names, _ = strata_rows(db, ref)
+    pairs = db.strata_overlap(ref)
+    names = [s for s in names if any((s, t) in pairs for t in names)]
+    if not names:
+        raise NoData("no metrics_strata/jaccard_%s.tsv" % ref)
+    matrix = [[1.0 if a == b else pairs.get((a, b), NAN) for b in names] for a in names]
+    n = len(names)
+    fig, ax = plt.subplots(figsize=((60 + 9 * n) * st.MM, (34 + 7.5 * n) * st.MM),
+                           constrained_layout=True)
+    labels = [stratum_label(s) for s in names]
+    im = heatmap(ax, matrix, labels, labels, [("", n)], [("", n)],
+                 label=lambda v: "%.2f" % v, cmap=st.SEQUENTIAL, vmin=0, vmax=1)
+    plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
+    colorbar(fig, im, ax, "Jaccard index")
+    return save(fig, ctx, "figS3f_strata_overlap_" + ref)
 
 
 # ------------------------------------------- callers over one denominator: 5b
@@ -794,23 +994,29 @@ def recall_pct(db, key):
 
 
 # A difference of 10% between the references is invisible on a log-log plot
-# that spans two decades, so every version below has the ratio T2T / GRCh38 of
-# the same run on its own axis next to it.
-#   pooled      one panel, colour and shape are the phaser
-#   technology  ONT and PacBio side by side, colour is the platform
-#   platform    one panel, colour and shape are the platform, and the ratios
-#               as a strip per platform, where a shift of one platform shows
+# that spans two decades, so the ratio T2T / GRCh38 of the same run gets plots
+# of its own: a box per group, its runs as points over it. Every file is one
+# panel; all files of one metric share their axis limits, so they can be put
+# side by side.
+#   scatter_all          every run, colour and shape are the phaser
+#   scatter_ONT/PacBio   one technology, colour is the platform, shape the phaser
+#   scatter_by_platform  every run, colour and shape are the platform
+#   ratio_by_phaser      a box per phaser, all platforms together
+#   ratio_by_technology  a box per phaser, ONT and PacBio apart
+#   ratio_by_platform    a box per platform
 
 RATIO_TICKS = [0.25, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 2, 4]
 TECHNOLOGIES = [("ONT", ["ont4k", "ont5k"]), ("PacBio", ["hifi", "revio"])]
+BAND = 1.1  # the shaded band: T2T within 10% of GRCh38
 
 
-def reference_pairs(db, value, platforms, phasers):
-    """(GRCh38, T2T) for every run computed on both, by (platform, phaser)."""
+def reference_pairs(db, value):
+    """(GRCh38, T2T) for every run computed on both, by (platform, phaser);
+    the callers and depths of a cell are its points."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     pairs = {}
-    for platform in platforms:
-        for phaser in phasers:
+    for platform in st.PLATFORMS:
+        for phaser in st.PHASERS:
             pts = []
             for caller in st.CALLERS:
                 for depth in st.DEPTHS:
@@ -820,11 +1026,17 @@ def reference_pairs(db, value, platforms, phasers):
                         pts.append((x, y))
             if pts:
                 pairs[(platform, phaser)] = pts
+    if not pairs:
+        raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
     return pairs
 
 
-def median_ratio(pts):
-    return float(np.median([y / x for x, y in pts]))
+def legend_panel(width, height, legend_rows=1):
+    fig = plt.figure(figsize=(width * st.MM, height * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[0.08 * legend_rows, 1])
+    legend_ax = fig.add_subplot(grid[0])
+    legend_ax.axis("off")
+    return fig, legend_ax, fig.add_subplot(grid[1])
 
 
 def identity_axes(ax, lo, hi, label):
@@ -834,183 +1046,164 @@ def identity_axes(ax, lo, hi, label):
     ax.set_yscale("log")
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
+    ax.set_aspect("equal", adjustable="box")
     log_ticks(ax.xaxis, lo, hi)
     log_ticks(ax.yaxis, lo, hi)
+    ax.set_xlabel("%s, %s" % (label, st.REFERENCE_LABEL[a]))
     ax.set_ylabel("%s, %s" % (label, st.REFERENCE_LABEL[b]))
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
 
 
-def ratio_axis(ax, ratios):
-    """Log ratio, symmetric about 1, with the +-10% band shaded."""
+def reference_scatter_file(db, ctx, name, value, label, cells, style_of, handles):
+    pairs = reference_pairs(db, value)
+    seen = [v for pts in pairs.values() for p in pts for v in p]
+    lo, hi = min(seen) / 1.3, max(seen) * 1.3
+    fig, legend_ax, ax = legend_panel(88, 98, legend_rows=2)
+    drawn = 0
+    for platform, phaser in cells:
+        pts = pairs.get((platform, phaser))
+        if not pts:
+            continue
+        color, marker = style_of(platform, phaser)
+        xs, ys = zip(*pts)
+        ax.scatter(xs, ys, s=12, color=color, marker=marker, edgecolor="white",
+                   linewidth=0.4, alpha=0.9, zorder=3)
+        drawn += 1
+    if not drawn:
+        plt.close(fig)
+        raise NoData("none of these runs is computed on both references")
+    identity_axes(ax, lo, hi, label)
+    top_legend(legend_ax, handles, ncol=3 if len(handles) == 6 else min(len(handles), 4))
+    return save(fig, ctx, name)
+
+
+def ratio_axis(ax, ratios, label):
+    """Log ratio, symmetric about 1, the band of +-10% shaded."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     span = max(abs(math.log10(r)) for r in ratios)
     span = max(span * 1.15, math.log10(1.25))
     ax.set_yscale("log")
     ax.set_ylim(10 ** -span, 10 ** span)
-    ax.axhspan(1 / 1.1, 1.1, color=st.GRID, linewidth=0, zorder=0)
+    ax.axhspan(1 / BAND, BAND, color=st.GRID, linewidth=0, zorder=0)
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
     ax.set_yticks([t for t in RATIO_TICKS if 10 ** -span <= t <= 10 ** span])
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
     ax.yaxis.set_minor_locator(NullLocator())
-    ax.set_ylabel("%s / %s" % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
+    ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
 
 
-def reference_columns(db, ctx, name, value, label, columns, style_of, handles_of):
-    """columns: [(title, [(platform, phaser), ...])]; a log-log panel over its
-    ratio panel for each column. style_of(platform, phaser) -> colour, marker."""
-    a = st.REFERENCES[0]
-    pairs = reference_pairs(db, value, st.PLATFORMS, st.PHASERS)
-    if not pairs:
-        raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
-    seen = [v for pts in pairs.values() for p in pts for v in p]
-    lo, hi = min(seen) / 1.3, max(seen) * 1.3
-    ratios = [y / x for pts in pairs.values() for x, y in pts]
-
-    n = len(columns)
-    fig = plt.figure(figsize=((40 + 70 * n) * st.MM, (118 + 6 * (n > 1)) * st.MM),
-                     constrained_layout=True)
-    grid = fig.add_gridspec(3, n, height_ratios=[0.1 + 0.08 * (n > 1), 1, 0.55])
-    legend_ax = fig.add_subplot(grid[0, :])
-    legend_ax.axis("off")
-    first_top = first_bottom = None
-    for i, (column_title, cells) in enumerate(columns):
-        top = fig.add_subplot(grid[1, i], sharex=first_top, sharey=first_top)
-        bottom = fig.add_subplot(grid[2, i], sharex=top, sharey=first_bottom)
-        first_top, first_bottom = first_top or top, first_bottom or bottom
-        for platform, phaser in cells:
-            pts = pairs.get((platform, phaser))
-            if not pts:
-                continue
-            color, marker = style_of(platform, phaser)
-            xs, ys = zip(*pts)
-            for ax, yv in ((top, ys), (bottom, [y / x for x, y in pts])):
-                ax.scatter(xs, yv, s=12, color=color, marker=marker, edgecolor="white",
-                           linewidth=0.4, alpha=0.9, zorder=3)
-        identity_axes(top, lo, hi, label)
-        ratio_axis(bottom, ratios)
-        bottom.set_xlabel("%s, %s" % (label, st.REFERENCE_LABEL[a]))
-        bottom.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
-        top.tick_params(labelbottom=False)
-        if column_title:
-            top.set_title(column_title)
-        if i:
-            top.tick_params(labelleft=False)
-            bottom.tick_params(labelleft=False)
-            top.set_ylabel("")
-            bottom.set_ylabel("")
-    handles = handles_of(pairs)
-    top_legend(legend_ax, handles, ncol=min(len(handles), 4))
-    return save(fig, ctx, name)
-
-
-def labelled(handle, pts_list):
-    """A legend entry with the median ratio of its runs."""
-    pts = [p for pts in pts_list for p in pts]
-    if pts:
-        handle.set_label("%s  %.2f×" % (handle.get_label(), median_ratio(pts)))
-    return handle
-
-
-def reference_pooled(db, ctx, name, value, label):
-    cells = [(pl, ph) for pl in st.PLATFORMS for ph in st.PHASERS]
-    return reference_columns(
-        db, ctx, name, value, label, [("", cells)],
-        lambda pl, ph: (st.PHASER_COLOR[ph], st.PHASER_MARKER[ph]),
-        lambda pairs: [labelled(h, [pairs.get((pl, ph), []) for pl in st.PLATFORMS])
-                       for h, ph in zip(phaser_handles(line=False), st.PHASERS)])
-
-
-def reference_technology(db, ctx, name, value, label):
-    columns = [(tech, [(pl, ph) for pl in platforms for ph in st.PHASERS])
-               for tech, platforms in TECHNOLOGIES]
-    phaser_shapes = [Line2D([], [], color="none", marker=st.PHASER_MARKER[p],
-                            markerfacecolor=st.MUTED, markeredgecolor="white",
-                            label=st.PHASER_LABEL[p]) for p in st.PHASERS]
-    return reference_columns(
-        db, ctx, name, value, label, columns,
-        lambda pl, ph: (st.PLATFORM_COLOR[pl], st.PHASER_MARKER[ph]),
-        lambda pairs: [labelled(h, [pairs.get((pl, ph), []) for ph in st.PHASERS])
-                       for h, pl in zip(platform_handles(line=False), st.PLATFORMS)]
-        + phaser_shapes)
-
-
-def reference_platform(db, ctx, name, value, label):
-    """Colour and shape both say platform; the right panel puts each platform's
-    ratios in a column of its own, a bar at the median."""
-    a = st.REFERENCES[0]
-    pairs = reference_pairs(db, value, st.PLATFORMS, st.PHASERS)
-    if not pairs:
-        raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
-    seen = [v for pts in pairs.values() for p in pts for v in p]
-    lo, hi = min(seen) / 1.3, max(seen) * 1.3
-
-    fig = plt.figure(figsize=(150 * st.MM, 78 * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, 2, height_ratios=[0.1, 1], width_ratios=[1, 0.8])
-    legend_ax = fig.add_subplot(grid[0, :])
-    legend_ax.axis("off")
-    ax = fig.add_subplot(grid[1, 0])
-    strip = fig.add_subplot(grid[1, 1])
+def reference_box_file(db, ctx, name, value, label, groups):
+    """groups: [(group label, [(box label, colour, [(platform, phaser), ...])])].
+    A box is the middle half of the ratios, its whiskers reach the furthest
+    ratio within 1.5 box lengths, the black bar is the median, written above."""
+    pairs = reference_pairs(db, value)
+    all_ratios = [y / x for pts in pairs.values() for x, y in pts]
+    boxes = sum(len(boxes) for _, boxes in groups)
+    fig, ax = plt.subplots(figsize=((34 + 11 * boxes) * st.MM, 70 * st.MM),
+                           constrained_layout=True)
     rng = np.random.RandomState(0)
-    ratios = []
-    for i, platform in enumerate(st.PLATFORMS):
-        pts = [p for ph in st.PHASERS for p in pairs.get((platform, ph), [])]
-        if not pts:
-            continue
-        color, marker = st.PLATFORM_COLOR[platform], st.PLATFORM_MARKER[platform]
-        xs, ys = zip(*pts)
-        ax.scatter(xs, ys, s=12, color=color, marker=marker, edgecolor="white",
-                   linewidth=0.4, alpha=0.9, zorder=3)
-        r = [y / x for x, y in pts]
-        ratios.extend(r)
-        strip.scatter(i + rng.uniform(-0.22, 0.22, len(r)), r, s=9, color=color, marker=marker,
-                      edgecolor="white", linewidth=0.3, alpha=0.9, zorder=3)
-        med = float(np.median(r))
-        strip.plot([i - 0.32, i + 0.32], [med, med], color=st.INK, linewidth=1.0, zorder=4)
-        strip.annotate("%.2f×" % med, xy=(i, 1), xycoords=strip.get_xaxis_transform(),
-                       xytext=(0, 2), textcoords="offset points", ha="center", va="bottom")
-    identity_axes(ax, lo, hi, label)
-    ax.set_xlabel("%s, %s" % (label, st.REFERENCE_LABEL[a]))
-    ratio_axis(strip, ratios)
-    strip.set_xticks(range(len(st.PLATFORMS)))
-    strip.set_xticklabels([st.PLATFORM_LABEL[p] for p in st.PLATFORMS],
-                          rotation=35, ha="right", rotation_mode="anchor")
-    strip.set_xlim(-0.6, len(st.PLATFORMS) - 0.4)
-    strip.tick_params(axis="x", length=0)
-    top_legend(legend_ax, platform_handles(line=False))
+    pos, ticks, tick_labels = 0, [], []
+    for g, (group_label, members) in enumerate(groups):
+        first = pos
+        for box_label, color, cells in members:
+            r = [y / x for c in cells for x, y in pairs.get(c, [])]
+            if r:
+                ax.boxplot([r], positions=[pos], widths=0.6, patch_artist=True,
+                           showfliers=False, zorder=3,
+                           boxprops=dict(facecolor=color, alpha=0.3, edgecolor=color, linewidth=0.8),
+                           medianprops=dict(color=st.INK, linewidth=1.2),
+                           whiskerprops=dict(color=color, linewidth=0.8),
+                           capprops=dict(color=color, linewidth=0.8))
+                ax.scatter(pos + rng.uniform(-0.2, 0.2, len(r)), r, s=5, color=color,
+                           edgecolor="white", linewidth=0.3, alpha=0.8, zorder=4)
+                ax.annotate("%.2f×" % float(np.median(r)), xy=(pos, 1),
+                            xycoords=ax.get_xaxis_transform(), xytext=(0, 2),
+                            textcoords="offset points", ha="center", va="bottom")
+            ticks.append(pos)
+            tick_labels.append(box_label)
+            pos += 1
+        if group_label:
+            ax.annotate(group_label, xy=((first + pos - 1) / 2, 1),
+                        xycoords=ax.get_xaxis_transform(), xytext=(0, 13),
+                        textcoords="offset points", ha="center", va="bottom")
+            if g < len(groups) - 1:
+                ax.axvline(pos - 0.5 + 0.35, color=st.GRID, linewidth=0.8, zorder=0)
+        pos += 0.7 if g < len(groups) - 1 else 0
+    ratio_axis(ax, all_ratios, label)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(tick_labels, rotation=35, ha="right", rotation_mode="anchor")
+    ax.set_xlim(-0.6, pos - 0.4)
+    ax.tick_params(axis="x", length=0)
     return save(fig, ctx, name)
 
 
-SER_LABEL = "Switch error rate (%)"
-NG50_LABEL = "Phase block NG50 (Mb)"
+def platform_style(platform, phaser):
+    return st.PLATFORM_COLOR[platform], st.PLATFORM_MARKER[platform]
 
 
-def fig6a1(db, ctx):
-    return reference_pooled(db, ctx, "fig6a1_reference_switch_rate_pooled", switch_pct, SER_LABEL)
+def phaser_shapes():
+    return [Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
+                   markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS]
 
 
-def fig6a2(db, ctx):
-    return reference_technology(db, ctx, "fig6a2_reference_switch_rate_by_technology",
-                                switch_pct, SER_LABEL)
+def reference_files(db, ctx, prefix, value, label):
+    """Every file of one metric; a file with nothing to show is skipped and
+    the others are still drawn."""
+    every = [(pl, ph) for pl in st.PLATFORMS for ph in st.PHASERS]
+    jobs = [
+        ("scatter_all", lambda: reference_scatter_file(
+            db, ctx, prefix + "_scatter_all", value, label, every,
+            lambda pl, ph: (st.PHASER_COLOR[ph], st.PHASER_MARKER[ph]),
+            phaser_handles(line=False))),
+        ("scatter_by_platform", lambda: reference_scatter_file(
+            db, ctx, prefix + "_scatter_by_platform", value, label, every,
+            platform_style, platform_handles(line=False))),
+    ]
+    for tech, platforms in TECHNOLOGIES:
+        jobs.append(("scatter_" + tech, lambda tech=tech, platforms=platforms: reference_scatter_file(
+            db, ctx, prefix + "_scatter_" + tech, value, label,
+            [(pl, ph) for pl in platforms for ph in st.PHASERS],
+            lambda pl, ph: (st.PLATFORM_COLOR[pl], st.PHASER_MARKER[ph]),
+            [h for h, pl in zip(platform_handles(line=False), st.PLATFORMS) if pl in platforms]
+            + phaser_shapes())))
+    by_phaser = [(st.PHASER_LABEL[p], st.PHASER_COLOR[p], [(pl, p) for pl in st.PLATFORMS])
+                 for p in st.PHASERS]
+    jobs += [
+        ("ratio_by_phaser", lambda: reference_box_file(
+            db, ctx, prefix + "_ratio_by_phaser", value, label, [("", by_phaser)])),
+        ("ratio_by_technology", lambda: reference_box_file(
+            db, ctx, prefix + "_ratio_by_technology", value, label,
+            [(tech, [(st.PHASER_LABEL[p], st.PHASER_COLOR[p], [(pl, p) for pl in platforms])
+                     for p in st.PHASERS])
+             for tech, platforms in TECHNOLOGIES])),
+        ("ratio_by_platform", lambda: reference_box_file(
+            db, ctx, prefix + "_ratio_by_platform", value, label,
+            [(tech, [(st.PLATFORM_LABEL[pl], st.PLATFORM_COLOR[pl], [(pl, p) for p in st.PHASERS])
+                     for pl in platforms])
+             for tech, platforms in TECHNOLOGIES])),
+    ]
+    written = []
+    for _, job in jobs:
+        try:
+            written.append(job())
+        except NoData:
+            pass
+        finally:
+            plt.close("all")
+    if not written:
+        raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
+    return ", ".join(written)
 
 
-def fig6a3(db, ctx):
-    return reference_platform(db, ctx, "fig6a3_reference_switch_rate_by_platform",
-                              switch_pct, SER_LABEL)
+def fig6a(db, ctx):
+    return reference_files(db, ctx, "fig6a_reference_switch_rate", switch_pct,
+                           "Switch error rate (%)")
 
 
-def fig6b1(db, ctx):
-    return reference_pooled(db, ctx, "fig6b1_reference_block_ng50_pooled", n50_mb, NG50_LABEL)
-
-
-def fig6b2(db, ctx):
-    return reference_technology(db, ctx, "fig6b2_reference_block_ng50_by_technology",
-                                n50_mb, NG50_LABEL)
-
-
-def fig6b3(db, ctx):
-    return reference_platform(db, ctx, "fig6b3_reference_block_ng50_by_platform",
-                              n50_mb, NG50_LABEL)
+def fig6b(db, ctx):
+    return reference_files(db, ctx, "fig6b_reference_block_ng50", n50_mb,
+                           "Phase block NG50 (Mb)")
 
 
 def fig6c(db, ctx):
@@ -1036,16 +1229,18 @@ FIGURES = [
     ("figS2c", figS2c, True),
     ("fig5d", fig5d, True),
     ("fig5e", fig5e, True),
-    ("fig6a1", fig6a1, False),
-    ("fig6a2", fig6a2, False),
-    ("fig6a3", fig6a3, False),
-    ("fig6b1", fig6b1, False),
-    ("fig6b2", fig6b2, False),
-    ("fig6b3", fig6b3, False),
+    ("fig6a", fig6a, False),
+    ("fig6b", fig6b, False),
     ("fig6c", fig6c, False),
     ("fig7a", fig7a, True),
     ("fig7b", fig7b, True),
     ("fig7c", fig7c, True),
     ("fig8", fig8, True),
+    ("figS3a", figS3a, True),
+    ("figS3b", figS3b, True),
+    ("figS3c", figS3c, True),
+    ("figS3d", figS3d, True),
+    ("figS3e", figS3e, True),
+    ("figS3f", figS3f, True),
     ("figS1", figS1, True),
 ]
