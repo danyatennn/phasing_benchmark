@@ -217,7 +217,7 @@ def fig1a(db, ctx, ref):
 
 def fig1b(db, ctx, ref):
     return coverage_lines(db, ctx, "fig1b_block_n50_by_platform_" + ref, ref,
-                          n50_mb, "Phase block N50 (Mb)", "platform", log=True)
+                          n50_mb, "Phase block NG50 (Mb)", "platform", log=True)
 
 
 def fig1c(db, ctx, ref):
@@ -232,7 +232,7 @@ def fig2a(db, ctx, ref):
 
 def fig2b(db, ctx, ref):
     return coverage_lines(db, ctx, "fig2b_block_n50_by_phaser_" + ref, ref,
-                          n50_mb, "Phase block N50 (Mb)", "phaser", log=True)
+                          n50_mb, "Phase block NG50 (Mb)", "phaser", log=True)
 
 
 def fig7a(db, ctx, ref):
@@ -253,6 +253,12 @@ def fig7c(db, ctx, ref):
 
 
 # ------------------------------------------------ accuracy against contiguity: 3
+
+def better_top_right(axes):
+    """Fewer errors go up, so the best run sits in the top right corner of
+    every panel; the axes share y, so inverting one inverts them all."""
+    axes[0].invert_yaxis()
+
 
 def fig3(db, ctx, ref, caller="truth"):
     sizes = [5 + 7 * i for i in range(len(st.DEPTHS))]
@@ -278,7 +284,7 @@ def fig3(db, ctx, ref, caller="truth"):
             ys_all.extend(ys)
             lines += 1
         ax.set_title(st.PLATFORM_LABEL[platform])
-        ax.set_xlabel("Phase block N50 (Mb)")
+        ax.set_xlabel("Phase block NG50 (Mb)")
         y_grid(ax)
         if not lines:
             empty_panel(ax)
@@ -290,6 +296,7 @@ def fig3(db, ctx, ref, caller="truth"):
     axes[0].set_yscale("log")
     log_ticks(axes[0].xaxis, min(xs_all), max(xs_all))
     log_ticks(axes[0].yaxis, min(ys_all), max(ys_all))
+    better_top_right(axes)
     axes[0].set_ylabel("Switch error rate (%)")
 
     coverage = [Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
@@ -481,10 +488,9 @@ def fig5b(db, ctx, ref):
 
 
 def short_number(v):
-    """Two significant figures at most, so a value fits its cell."""
-    if v < 0.1:
-        return "%.2f" % v
-    return "%.1f" % v if v < 10 else "%.0f" % v
+    """Two significant figures, so a value fits its cell and a small one is
+    not printed as 0.00."""
+    return "%.0f" % v if v >= 10 else "%.2g" % v
 
 
 def grid_heatmap(db, ctx, ref, name, value, bar_label):
@@ -705,6 +711,7 @@ def fig5e(db, ctx, ref):
 
     axes[0].set_yscale("log")
     log_ticks(axes[0].yaxis, min(ys_all), max(ys_all))
+    better_top_right(axes)
     axes[0].set_ylabel("Switch error rate on\nthose sites (%%), %d×" % depth)
     shapes = [Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor="white",
                      markeredgecolor=st.INK, markeredgewidth=0.7, label=st.PHASER_LABEL[p])
@@ -793,7 +800,7 @@ def fig6a(db, ctx):
 
 def fig6b(db, ctx):
     return reference_scatter(db, ctx, "fig6b_reference_block_n50",
-                             n50_mb, "Block N50 (Mb)", log=True)
+                             n50_mb, "Phase block NG50 (Mb)", log=True)
 
 
 def fig6c(db, ctx):
