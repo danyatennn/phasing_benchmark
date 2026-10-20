@@ -56,12 +56,21 @@ require_file() { [[ -f "$1" ]] || die "missing $2: $1"; }
 
 
 # sample_path <sample> <item> - the value of <item> for <sample> in samples.tsv
-# (sample, item, value; # starts a comment); empty when it is not there
+# (sample, item, value; # starts a comment); empty when it is not there. A value
+# written as $NAME is the variable NAME of data_config_germline.sh, so the paths
+# are kept in one place; it is empty if that variable is not set.
 sample_path() {
   [[ -s "${SAMPLES_TSV:-}" ]] || return 0
-  awk -F'\t' -v s="$1" -v i="$2" '
+  local value name
+  value="$(awk -F'\t' -v s="$1" -v i="$2" '
     /^#/ || NF < 3 { next }
-    $1 == s && $2 == i { print $3; exit }' "${SAMPLES_TSV}"
+    $1 == s && $2 == i { print $3; exit }' "${SAMPLES_TSV}")"
+  if [[ "${value}" =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$ ]]; then
+    name="${BASH_REMATCH[1]}"
+    value="${!name:-}"
+  fi
+  [[ -n "${value}" ]] && printf '%s\n' "${value}"
+  return 0
 }
 
 # sample_platforms <sample> - the platforms with a source BAM in samples.tsv,
@@ -85,10 +94,13 @@ source_bam() {
         return 0
     fi
 
-    # every sample but HG002 lists its BAMs in samples.tsv
+    # every sample but HG002 lists its BAMs in samples.tsv; config.sh resolves
+    # them into SAMPLE_BAM_<platform>, exported, so a function run by GNU
+    # parallel sees them without data_config_germline.sh
     if [[ "${SAMPLE}" != HG002 ]]; then
-        local path
-        path="$(sample_path "${SAMPLE}" "bam_${platform}")"
+        local path var="SAMPLE_BAM_${platform}"
+        path="${!var:-}"
+        [[ -n "${path}" ]] || path="$(sample_path "${SAMPLE}" "bam_${platform}")"
         [[ -n "${path}" ]] || {
             printf 'no bam_%s for %s in %s\n' "${platform}" "${SAMPLE}" "${SAMPLES_TSV}" >&2
             return 1

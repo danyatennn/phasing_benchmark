@@ -1,0 +1,63 @@
+# sample	item	value
+#
+# Inputs of every sample but HG002, whose own paths stay in config.sh and lib.sh.
+# Read by sample_path in lib.sh; columns separated by one TAB.
+#
+# A value $NAME is the variable NAME of
+# /autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline.sh,
+# so every path lives there once. Only the v4.2.1 BEDs, which that file does not
+# list, are written out - after the GIAB file names next to the VCFs, not yet
+# checked: run bin/check_samples.sh before the first run of a sample.
+#
+#   bam_<platform>    source BAM on GRCh38; a platform without a line is not run
+#   truth_GRCh38      GIAB small-variant benchmark VCF
+#   bed_GRCh38        its benchmark regions
+#   pat_reads         the father's / mother's reads for the trio k-mers
+#   mat_reads         (BAM, CRAM or FASTQ; several separated by spaces)
+#
+# ONT 4 kHz for HG001 and HG005-HG007: data_config has HG00X_ONT_30x_GRCH38_BAM,
+# of unknown chemistry. bin/check_samples.sh prints its basecaller model; if it
+# is R10.4.1 4 kHz, uncomment its line.
+#
+HG002	pat_reads	$HG003_REVIO_BAM
+HG002	mat_reads	$HG004_REVIO_BAM
+#
+HG001	bam_ont5k	$ONT_HG001_V14_5KHZ_NO_ALT_BAM
+HG001	bam_hifi	$PB_HG001_NO_ALT_BAM
+#HG001	bam_ont4k	$HG001_ONT_30x_GRCH38_BAM
+HG001	truth_GRCh38	$HG001_GRCH38_TRUTH_VCF
+HG001	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG001_GRCh38_1_22_v4.2.1_benchmark.bed
+#
+HG003	bam_ont4k	$ONT_HG003_dorado_NO_ALT_BAM
+HG003	bam_ont5k	$ONT_HG003_V14_5KHZ_NO_ALT_BAM
+HG003	bam_hifi	$PB_HG003_20K_NO_ALT_BAM
+HG003	bam_revio	$HG003_REVIO_BAM
+HG003	truth_GRCh38	$HG003_GRCH38_TRUTH_VCF
+HG003	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG003_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+#
+HG004	bam_ont4k	$ONT_HG004_dorado_NO_ALT_BAM
+HG004	bam_ont5k	$ONT_HG004_V14_5KHZ_NO_ALT_BAM
+HG004	bam_hifi	$PB_HG004_20K_NO_ALT_BAM
+HG004	bam_revio	$HG004_REVIO_BAM
+HG004	truth_GRCh38	$HG004_GRCH38_TRUTH_VCF
+HG004	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG004_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+#
+HG005	bam_ont5k	$ONT_HG005_V14_5KHZ_NO_ALT_BAM
+HG005	bam_hifi	$PB_HG005_NO_ALT_BAM
+#HG005	bam_ont4k	$HG005_ONT_30x_GRCH38_BAM
+HG005	truth_GRCh38	$HG005_GRCH38_TRUTH_VCF
+HG005	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG005_GRCh38_1_22_v4.2.1_benchmark.bed
+HG005	pat_reads	$HG006_PACBIO_30x_GRCH38_BAM
+HG005	mat_reads	$HG007_PACBIO_30x_GRCH38_BAM
+#
+HG006	bam_ont5k	$ONT_HG006_V14_5KHZ_NO_ALT_BAM
+HG006	bam_hifi	$HG006_PACBIO_30x_GRCH38_BAM
+#HG006	bam_ont4k	$HG006_ONT_30x_GRCH38_BAM
+HG006	truth_GRCh38	$HG006_GRCH38_TRUTH_VCF
+HG006	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG006_GRCh38_1_22_v4.2.1_benchmark.bed
+#
+HG007	bam_ont5k	$ONT_HG007_V14_5KHZ_NO_ALT_BAM
+HG007	bam_hifi	$HG007_PACBIO_30x_GRCH38_BAM
+#HG007	bam_ont4k	$HG007_ONT_30x_GRCH38_BAM
+HG007	truth_GRCh38	$HG007_GRCH38_TRUTH_VCF
+HG007	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG007_GRCh38_1_22_v4.2.1_benchmark.bed

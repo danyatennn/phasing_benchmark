@@ -18,8 +18,9 @@ phase_one() {
   is_done "${out}" && { log "skip ${name}"; return 0; }
 
   local lock="${out}.lock"
-  mkdir "${lock}" 2>/dev/null || { log "busy elsewhere ${name}"; return 0; }
-  trap "rmdir '${lock}' 2>/dev/null" EXIT INT TERM HUP
+  mkdir "${lock}" 2>/dev/null || { log "busy elsewhere ${name} ($(cat "${lock}/owner" 2>/dev/null))"; return 0; }
+  printf '%s %s %s\n' "$(hostname)" "$$" "$(date '+%F %H:%M')" >"${lock}/owner"
+  trap "rm -f '${lock}/owner'; rmdir '${lock}' 2>/dev/null" EXIT INT TERM HUP
 
   local bam; bam="$(sub_bam "${platform}" "${REFERENCE_NAME}" "${depth}")"
   local logf="${LOGS_DIR}/phase/${name}.log"
@@ -51,10 +52,15 @@ phase_one() {
       local tmp; tmp="$(mktemp -d -p "${TMP_DIR}")"
       "${BCFTOOLS}" view "${vcf_in}" >"${tmp}/in.vcf"
 
+      # no -p unless MARGIN_DEPTH is set: Margin downsamples to maxDepth from
+      # its params, as its authors set it up
+      local depth_cap=()
+      [[ -n "${MARGIN_DEPTH}" ]] && depth_cap=(-p "${MARGIN_DEPTH}")
+
       "${MARGIN}" phase \
           "${bam}" "${REF}" "${tmp}/in.vcf" "$(margin_params "${platform}")" \
           -t "${PHASE_THREADS}" \
-          -p "${MARGIN_DEPTH}" \
+          ${depth_cap[@]+"${depth_cap[@]}"} \
           -o "${tmp}/out" \
           -M \
         >"${logf}" 2>&1 \
