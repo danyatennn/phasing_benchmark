@@ -55,6 +55,25 @@ for_each_run() {
 require_file() { [[ -f "$1" ]] || die "missing $2: $1"; }
 
 
+# sample_path <sample> <item> - the value of <item> for <sample> in samples.tsv
+# (sample, item, value; # starts a comment); empty when it is not there
+sample_path() {
+  [[ -s "${SAMPLES_TSV:-}" ]] || return 0
+  awk -F'\t' -v s="$1" -v i="$2" '
+    /^#/ || NF < 3 { next }
+    $1 == s && $2 == i { print $3; exit }' "${SAMPLES_TSV}"
+}
+
+# sample_platforms <sample> - the platforms with a source BAM in samples.tsv,
+# in the order the grid uses
+sample_platforms() {
+  local p out=()
+  for p in ont4k ont5k hifi revio; do
+    [[ -n "$(sample_path "$1" "bam_${p}")" ]] && out+=("${p}")
+  done
+  printf '%s\n' "${out[*]}"
+}
+
 # source_bam <platform> [reference]
 # reference defaults to REFERENCE_NAME
 source_bam() {
@@ -63,6 +82,18 @@ source_bam() {
 
     if [[ "${reference}" != "GRCh38" ]]; then
         printf '%s/%s.bam\n' "${T2T_SRC_DIR}" "${platform}"
+        return 0
+    fi
+
+    # every sample but HG002 lists its BAMs in samples.tsv
+    if [[ "${SAMPLE}" != HG002 ]]; then
+        local path
+        path="$(sample_path "${SAMPLE}" "bam_${platform}")"
+        [[ -n "${path}" ]] || {
+            printf 'no bam_%s for %s in %s\n' "${platform}" "${SAMPLE}" "${SAMPLES_TSV}" >&2
+            return 1
+        }
+        printf '%s\n' "${path}"
         return 0
     fi
 
@@ -171,6 +202,27 @@ bed_bp() { awk '{ s += $3 - $2 } END { print s + 0 }' "$1"; }
 
 is_done() {
   [[ -s "$1" && -s "$1.tbi" ]]
+}
+
+# newer_than <file> <reference> - the file exists, is not empty, and was
+# written after the reference: a result derived from it is still current
+newer_than() {
+  [[ -s "$1" && "$1" -nt "$2" ]]
+}
+
+# the columns of metrics/<run>.row.tsv (eval_run.sh, metrics.md)
+ROW_FIELDS=32
+
+# row_is_valid <row.tsv> - one line, ROW_FIELDS fields, the six labels set and every other field a number 
+row_is_valid() {
+  awk -F'\t' -v n="${ROW_FIELDS:-32}" '
+    NR == 1 {
+      if (NF != n) bad = 1
+      for (i = 1; i <= 6 && !bad; i++) if ($i == "") bad = 1
+      for (i = 7; i <= NF && !bad; i++)
+        if (tolower($i) !~ /^[-+]?([0-9]+(\.[0-9]*)?([e][-+]?[0-9]+)?|nan|inf)$/) bad = 1
+    }
+    END { exit (bad || NR != 1) }' "$1"
 }
 
 # vcf_name <platform> <depth> <caller> [phaser]
@@ -322,6 +374,63 @@ read_accuracy() {
     }
     END { print truth_tagged + 0, tagged + 0, compared + 0, correct + 0, unoriented + 0 }
   ' "$1" "$2" "$3"
+}
+
+# readacc_suffix - the file name readacc_run.sh writes for the current
+# READACC_MIN_SNPS and READACC_AUTOSOMES: "readacc" for the original 1 and 0,
+# otherwise readacc[_auto][_min<N>], so no setting overwrites another
+readacc_suffix() {
+  local min="${READACC_MIN_SNPS:-1}" auto="${READACC_AUTOSOMES:-0}" s="readacc"
+  [[ "${auto}" == 1 ]] && s="${s}_auto"
+  [[ "${min}" -gt 1 ]] && s="${s}_min${min}"
+  printf '%s\n' "${s}"
+}
+
+# block_sizes <test_gt.tsv> - chrom, PS, number of phased het SNPs, for every
+# phase block of the VCF being scored (test_gt as for block_orientation)
+block_sizes() {
+  awk -F'\t' -v OFS='\t' '
+    $6 == "." || $5 !~ /\|/ { next }
+    { split($5, a, "|"); if (a[1] == a[2]) next; n[$1 OFS $6]++ }
+    END { for (b in n) print b, n[b] }' "$1"
+}
+
+# read_accuracy_filtered <orientation.tsv> <block sizes> <truth tags> <test tags> <min snps> <autosomes>
+# read_accuracy with two rules on top:
+#   a read tagged in a block of fewer than <min snps> phased het SNPs counts as
+#   untagged - its label rests on single alleles, not on phase
+#   with <autosomes> 1, reads and blocks off chr1-22 are left out entirely
+# Prints the same five numbers as read_accuracy.
+read_accuracy_filtered() {
+  awk -F'\t' -v min="$5" -v auto="$6" '
+    function autosomal(c) { return !auto || c ~ /^chr([1-9]|1[0-9]|2[0-2])$/ }
+    FILENAME == ARGV[1] { flip[$1 FS $2] = $5; next }
+    FILENAME == ARGV[2] { size[$1 FS $2] = $3; next }
+    /^#/ { next }
+    FILENAME == ARGV[3] {
+      if ($1 in in_truth) next
+      in_truth[$1] = 1
+      if (!autosomal($4)) next
+      if ($2 == "H1" || $2 == "H2") { truth[$1] = $2; truth_tagged++ }
+      next
+    }
+    {
+      if ($1 in in_test) next
+      in_test[$1] = 1
+      if ($2 != "H1" && $2 != "H2") next
+      if (!autosomal($4)) next
+      b = $4 FS $3
+      if (size[b] + 0 < min) next
+      tagged++
+      if (!($1 in truth)) next
+      if (!(b in flip)) { unoriented++; next }
+      label = $2
+      if (flip[b] == 1) label = (label == "H1") ? "H2" : "H1"
+      compared++
+      if (label == truth[$1]) correct++
+    }
+    END { print truth_tagged + 0, tagged + 0, compared + 0, correct + 0, unoriented + 0 }
+  ' "$1" "$2" "$3" "$4"
 }
 
 # asm_dir <platform> <depth> <assembler> - where an assembly lives. It is built
