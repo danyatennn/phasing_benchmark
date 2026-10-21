@@ -67,8 +67,9 @@ FIGURES = [
     ("fig6a_reference_switch_rate_scatter_by_platform", False, "GRCh38 against T2T-CHM13: switch error rate",
      "Same run on both references, truth input, every coverage. Dashed line: equal on both."),
     ("fig6a_reference_switch_rate_ratio_by_technology", False, "GRCh38 against T2T-CHM13: switch error rate ratio",
-     "Ratio T2T-CHM13 / GRCh38 of the same run, truth input. Box: interquartile range; black "
-     "line: median, written above; grey band: within 10%; points: runs. Reads were aligned "
+     "Each point: one run (same platform, coverage and phaser) on both references, truth input; "
+     "a box pools the five coverages. Box: interquartile range; black line: median; number "
+     "above: the median change on T2T-CHM13 in percent; grey band: within 10%. Reads were aligned "
      "differently on the two references (provider alignments on GRCh38, minimap2 2.31 on "
      "T2T-CHM13)."),
     ("fig6b_reference_block_ng50_scatter_by_platform", False, "GRCh38 against T2T-CHM13: phase block NG50",
