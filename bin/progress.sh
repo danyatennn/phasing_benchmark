@@ -38,12 +38,22 @@ for b in clair3 run_deepvariant longcallD whatshap longphase margin HAPCUT2 extr
   [[ "${n:-0}" -gt 0 ]] && printf '  %-16s %s\n' "${b}" "${n}"
 done
 
-printf '\nсбои в joblog (7-я колонка - код выхода):\n'
-for f in logs/parallel_*.log; do
-  [[ -s "${f}" ]] || continue
-  awk -v f="${f}" 'NR > 1 { n++; if ($7 != 0) bad++ }
-    END { if (n) printf "  %-32s задач=%-4d сбоев=%d\n", f, n, bad + 0 }' "${f}"
-done
+# logs/ is shared by every host, so without a time window this lists the dead
+# slices forever. Backups made by keep_joblog are skipped too - same work twice.
+printf '\njoblog за последние 6 часов (7-я колонка - код выхода):\n'
+shown=0
+while IFS= read -r f; do
+  short="$(basename "${f}" | sed 's/^parallel_//; s/_10-20-30-40-50//; s/\.log$//')"
+  awk -v f="${short}" 'NR > 1 { n++; if ($7 != 0) bad++ }
+    END { if (n) printf "  %-52s задач=%-4d сбоев=%d\n", f, n, bad + 0 }' "${f}"
+  shown=1
+done < <(find logs -maxdepth 1 -name 'parallel_*.log' \
+    ! -name '*_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9].log' \
+    -mmin -360 2>/dev/null | sort)
+[[ "${shown}" -eq 1 ]] || printf '  нет свежих\n'
+
+printf 'всего сбоев за всю историю: %s\n' \
+    "$(find logs -maxdepth 1 -name 'parallel_*.log' ! -name '*_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9].log' -exec awk 'FNR > 1 && $7 != 0 { n++ } END { print n + 0 }' {} + 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')"
 
 # a lock whose owner process is gone makes that cell skip forever, and only the
 # host named in the lock can tell whether the pid is still alive

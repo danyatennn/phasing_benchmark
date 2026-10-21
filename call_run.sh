@@ -21,8 +21,9 @@ call_one() {
   is_done "${het}" && { log "skip ${name}"; return 0; }
 
   local lock="${het}.lock"
-  mkdir "${lock}" 2>/dev/null || { log "busy elsewhere ${name}"; return 0; }
-  trap "rmdir '${lock}' 2>/dev/null" EXIT INT TERM HUP
+  mkdir "${lock}" 2>/dev/null || { log "busy elsewhere ${name} ($(cat "${lock}/owner" 2>/dev/null))"; return 0; }
+  printf '%s %s %s\n' "$(hostname)" "$$" "$(date '+%F %H:%M')" >"${lock}/owner"
+  trap "rm -f '${lock}/owner'; rmdir '${lock}' 2>/dev/null" EXIT INT TERM HUP
 
   local bam; bam="$(sub_bam "${platform}" "${REFERENCE_NAME}" "${depth}")"
   local logf="${LOGS_DIR}/call/${name}.log"
@@ -38,7 +39,8 @@ call_one() {
 
   case "${caller}" in
     clair3)
-      "${SING}" exec --nv --cleanenv ${gpu[@]+"${gpu[@]}"} --env TMPDIR="${scratch}" \
+      timeout --kill-after=5m "${CALL_TIMEOUT}" \
+        "${SING}" exec --nv --cleanenv ${gpu[@]+"${gpu[@]}"} --env TMPDIR="${scratch}" \
           -B "${DATA_DIR},$(dirname "${REF}"),$(dirname "${CONFIDENT_BED}"),${CLAIR3_DIR},${SCRATCH_DIR}" \
           "${CLAIR3_SIF}" \
           /opt/bin/run_clair3.sh \
@@ -61,7 +63,8 @@ call_one() {
     deepvariant)
       local nv=()
       [[ "${DEEPVARIANT_USE_GPU}" == 1 ]] && nv=(--nv)
-      "${SING}" exec ${nv[@]+"${nv[@]}"} --cleanenv ${gpu[@]+"${gpu[@]}"} --env TMPDIR="${scratch}" \
+      timeout --kill-after=5m "${CALL_TIMEOUT}" \
+        "${SING}" exec ${nv[@]+"${nv[@]}"} --cleanenv ${gpu[@]+"${gpu[@]}"} --env TMPDIR="${scratch}" \
           -B "${DATA_DIR},$(dirname "${REF}"),$(dirname "${CONFIDENT_BED}"),${CLAIR3_DIR},${SCRATCH_DIR}" \
           "${DEEPVARIANT_SIF}" \
           /opt/deepvariant/bin/run_deepvariant \
@@ -80,7 +83,8 @@ call_one() {
       ;;
 
     longcalld)
-      "${LONGCALLD}" call \
+      timeout --kill-after=5m "${CALL_TIMEOUT}" \
+        "${LONGCALLD}" call \
           -t "${CALL_THREADS}" \
           "$(longcalld_preset "${platform}")" \
           --region-file "${CONFIDENT_BED}" \
@@ -111,11 +115,21 @@ export -f call_one vcf_name sub_bam bam_key is_done log warn die \
           clair3_platform clair3_model deepvariant_model longcalld_preset
 export VCF_DIR CLAIR3_DIR LOGS_DIR DATA_DIR REF CONFIDENT_BED SAMPLE \
        REFERENCE_NAME REGION_NAME SING CLAIR3_SIF DEEPVARIANT_SIF LONGCALLD \
-       CLAIR3_THREADS CALL_THREADS DEEPVARIANT_USE_GPU GPU_DEVICE SCRATCH_DIR BCFTOOLS TABIX BGZIP \
+       CLAIR3_THREADS CALL_THREADS CALL_TIMEOUT DEEPVARIANT_USE_GPU GPU_DEVICE SCRATCH_DIR BCFTOOLS TABIX BGZIP \
        SINGULARITY_TMPDIR SINGULARITY_CACHEDIR \
        CLAIR3_MODEL_ont4k CLAIR3_MODEL_ont5k CLAIR3_MODEL_hifi CLAIR3_MODEL_revio
 
 for caller in ${CALL_ONLY:-${VARIANT_CALLERS[@]}}; do
+  case "${caller}" in
+    clair3)      sif="${CLAIR3_SIF}" ;;
+    deepvariant) sif="${DEEPVARIANT_SIF}" ;;
+    *)           sif="" ;;
+  esac
+  if [[ -n "${sif}" && ! -s "${sif}" ]]; then
+    warn "${caller}: нет образа ${sif} - пропускаю этого коллера"
+    continue
+  fi
+
   jobs="$(call_jobs "${caller}")"
   log "${caller}: ${#PLATFORMS[@]} platforms x ${#DEPTHS[@]} depths, ${jobs} at a time"
   joblog="${LOGS_DIR}/parallel_call_${caller}_${RUN_TAG}.log"

@@ -78,6 +78,14 @@ prepare_one() {
   bed_intersect "${CONFIDENT_BED}" "${bed}.raw" >"${bed}"
   rm -f "${bed}.raw"
 
+  # STRATA_AUTOSOMES=1: chr1-22 only. A stratum with nothing left there
+  # (chrX_nonPAR) gets no truth file, and regions.sh skips it.
+  if [[ "${STRATA_AUTOSOMES}" == 1 ]]; then
+    awk '$1 ~ /^chr([1-9]|1[0-9]|2[0-2])$/' "${bed}" >"${bed}.auto"
+    mv -f "${bed}.auto" "${bed}"
+    [[ -s "${bed}" ]] || { warn "${stratum}: nothing on chr1-22 inside the confident BED - skipped"; rm -f "${bed}"; return 0; }
+  fi
+
   "${BCFTOOLS}" view -T "${bed}" -Oz -o "${truth}" "${TRUTH_PHASED}"
   "${TABIX}" -f -p vcf "${truth}"
 
@@ -87,7 +95,7 @@ prepare_one() {
 
 export -f prepare_one stratum_bed stratum_truth bed_intersect bed_bp log warn die
 export STRATA_DIR STRATA_REF PREPARED_DIR STRATA_TRUTH_DIR REFERENCE_NAME \
-       CONFIDENT_BED TRUTH_PHASED BCFTOOLS TABIX
+       CONFIDENT_BED TRUTH_PHASED BCFTOOLS TABIX STRATA_AUTOSOMES
 
 log "preparing ${REFERENCE_NAME} (strata named ${STRATA_REF})"
 strata_names \

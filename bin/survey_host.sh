@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 
 printf 'host      %s\n' "$(hostname)"
-printf 'ядер      %s\n' "$(nproc)"
+printf 'ядер      %s потоков, %s физических\n' "$(nproc)" \
+    "$(lscpu 2>/dev/null | awk -F: '/^Core\(s\) per socket/ {c=$2} /^Socket\(s\)/ {s=$2} END {print (c && s) ? c * s : "?"}' | tr -d ' ')"
 printf 'память    %s ГБ всего, %s ГБ свободно\n' \
     "$(free -g | awk 'NR == 2 { print $2 }')" "$(free -g | awk 'NR == 2 { print $7 }')"
 
 if command -v nvidia-smi >/dev/null 2>&1; then
   printf 'GPU       %s\n' "$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | paste -sd'; ' -)"
-  printf 'GPU занят %s\n' "$(nvidia-smi --query-compute-apps=process_name,used_memory --format=csv,noheader | paste -sd'; ' - || echo свободна)"
+  busy="$(nvidia-smi --query-compute-apps=process_name,used_memory --format=csv,noheader | paste -sd'; ' -)"
+  printf 'GPU занят %s\n' "${busy:-свободна}"
 else
   printf 'GPU       нет nvidia-smi\n'
 fi
@@ -44,15 +46,19 @@ smoke() {
   local label="$1"; shift
   local all rc first
   if all="$("$@" 2>&1)"; then rc=0; else rc=$?; fi
-  first="${all%%$'\n'*}"
+  # these tools print their usage to stderr and exit non-zero when called with
+  # no real arguments, and some start it with a blank line - take the first line
+  # that actually says something, and show rc so a banner is not mistaken for a
+  # failure
+  first="$(printf '%s\n' "${all}" | awk 'NF { print; exit }')"
   case "${rc}" in
-    126|127) printf '  НЕ ЗАПУСКАЕТСЯ %-14s %s\n' "${label}" "${first}"; return ;;
+    126|127) printf '  НЕ ЗАПУСКАЕТСЯ %-14s rc=%-3s %s\n' "${label}" "${rc}" "${first}"; return ;;
     132)     printf '  SIGILL         %-14s собран под более новый процессор\n' "${label}"; return ;;
   esac
   case "${all}" in
     *"error while loading shared libraries"*|*GLIBC*|*"Illegal instruction"*|*"No such file or directory"*)
-             printf '  БИБЛИОТЕКИ     %-14s %s\n' "${label}" "${first}" ;;
-    *)       printf '  ok             %-14s %s\n' "${label}" "${first}" ;;
+             printf '  БИБЛИОТЕКИ     %-14s rc=%-3s %s\n' "${label}" "${rc}" "${first}" ;;
+    *)       printf '  ok             %-14s rc=%-3s %s\n' "${label}" "${rc}" "${first}" ;;
   esac
 }
 
@@ -69,7 +75,7 @@ if [[ -r /autofs/bal36/dten/phasing_benchmark/config.sh ]]; then
   smoke minimap2   "${MINIMAP2}" --version
   smoke singularity "${SING}" --version
   smoke longphase  "${LONGPHASE}" --help
-  smoke longcallD  "${LONGCALLD}" --version
+  smoke longcallD  "${LONGCALLD}"
   smoke margin     "${MARGIN}" --help
   smoke HAPCUT2    "${HAPCUT2_BIN}/HAPCUT2" --help
   smoke extractHAIRS "${HAPCUT2_BIN}/extractHAIRS"

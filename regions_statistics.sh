@@ -25,7 +25,10 @@ JACCARD_TIERS="${JACCARD_TIERS:-1 2}"
 
 mkdir -p "${METRICS_STRATA_DIR}" "${TMP_DIR}"
 
-GENOME_BP="$(awk '{ s += $2 } END { print s }' "${CHROM_LENGTHS}")"
+# with STRATA_AUTOSOMES=1 the genome, like every stratum, is chr1-22
+GENOME_BP="$(awk -v auto="${STRATA_AUTOSOMES}" '
+    auto == 1 && $1 !~ /^chr([1-9]|1[0-9]|2[0-2])$/ { next }
+    { s += $2 } END { print s }' "${CHROM_LENGTHS}")"
 DIFFICULT_BED="$(stratum_bed alldifficultregions)"
 
 stats_one() {
@@ -44,7 +47,9 @@ stats_one() {
   # the stratum before it met the confident BED
   local src bp_raw intervals_raw
   src="$(find "${STRATA_DIR}/${STRATA_REF}@all" -name "${STRATA_REF}_${stratum}.bed.gz" | head -1)"
-  read -r intervals_raw bp_raw < <(gzip -dc "${src}" | awk '{ n++; s += $3 - $2 } END { print n + 0, s + 0 }')
+  read -r intervals_raw bp_raw < <(gzip -dc "${src}" | awk -v auto="${STRATA_AUTOSOMES}" '
+      auto == 1 && $1 !~ /^chr([1-9]|1[0-9]|2[0-2])$/ { next }
+      { n++; s += $3 - $2 } END { print n + 0, s + 0 }')
 
   # and after, which is what every metric is computed over
   local intervals bp median_interval n50_interval
@@ -113,7 +118,7 @@ stats_one() {
 export -f stats_one stratum_bed stratum_truth bed_intersect log warn die
 export METRICS_STRATA_DIR PREPARED_DIR STRATA_TRUTH_DIR STRATA_DIR STRATA_REF \
        STRATA_LIST REFERENCE_NAME TRUTH_SRC_VCF TMP_DIR GENOME_BP DIFFICULT_BED \
-       BCFTOOLS
+       BCFTOOLS STRATA_AUTOSOMES
 
 log "${REFERENCE_NAME}: statistics for $(strata_names | wc -l) strata"
 strata_names | "${PARALLEL}" --joblog "${LOGS_DIR}/parallel_regions_stats_${REFERENCE_NAME}.log" \
@@ -150,8 +155,11 @@ log "overlap matrix for tiers: ${JACCARD_TIERS}"
 names="$(for t in ${JACCARD_TIERS}; do STRATA_TIER="${t}" strata_names; done)"
 {
   printf 'stratum_a\tstratum_b\tshared_bp\tjaccard\n'
+  # an if, not [[ ]] && printf: the last pair is a stratum with itself, and a
+  # false test as the loop's last command fails the pipeline under pipefail,
+  # which used to end the script before the table was written
   for a in ${names}; do for b in ${names}; do
-    [[ "${a}" < "${b}" ]] && printf '%s\t%s\n' "${a}" "${b}"
+    if [[ "${a}" < "${b}" ]]; then printf '%s\t%s\n' "${a}" "${b}"; fi
   done; done \
     | "${PARALLEL}" --colsep '\t' -j "${REGIONS_JOBS}" jaccard_pair {1} {2}
 } >"${jac}.$$"

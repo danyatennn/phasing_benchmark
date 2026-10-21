@@ -77,11 +77,22 @@ def panel_row(n, height=st.PANEL_HEIGHT, width=st.FULL_WIDTH, sharex=False):
 
 
 def log_ticks(axis, lo, hi):
-    """Plain numbers on a log axis, no 10^x - it would pull in the math font."""
-    wide = finite(lo) and finite(hi) and lo > 0 and hi / lo > 300
-    axis.set_major_locator(LogLocator(base=10, subs=(1,) if wide else (1, 2, 5), numticks=15))
-    axis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    """Plain numbers on a log axis, no 10^x - it would pull in the math font.
+    The wider the range, the fewer labels per decade, so neighbours never touch."""
+    span = hi / lo if finite(lo) and finite(hi) and lo > 0 else 1
+    subs = (1,) if span > 300 else (1, 3) if span > 40 else (1, 2, 5)
+    axis.set_major_locator(LogLocator(base=10, subs=subs, numticks=15))
+    axis.set_major_formatter(FuncFormatter(lambda v, _: tick_number(v)))
     axis.set_minor_locator(NullLocator())
+
+
+def tick_number(v):
+    """0.005, 0.3, 20, 5k, 2M - never 1e+06."""
+    if v >= 1e6:
+        return "%gM" % (v / 1e6)
+    if v >= 1e4:
+        return "%gk" % (v / 1e3)
+    return "%g" % v
 
 
 def y_grid(ax):
@@ -130,7 +141,9 @@ def coverage_lines(db, ctx, name, ref, value, ylabel, by, log=False, caller="tru
         panels, series = st.PLATFORMS, [c for c in st.CALLERS if c != "truth"]
         panel_label, color, marker = st.PLATFORM_LABEL, st.CALLER_COLOR, st.CALLER_MARKER
         handles = caller_handles(series)
-        key = lambda panel, s, depth: db.widest(ref, s, panel, depth, st.PHASERS)
+        # a caller's FNR and FDR from bin/calls_fdr.sh: inside the confident
+        # regions on chr1-22, the same for every phaser of the cell
+        key = lambda panel, s, depth: ("call", ref, s, panel, depth)
     elif by == "platform":
         panels, series = st.PLATFORMS, st.PHASERS
         panel_label, color, marker = st.PLATFORM_LABEL, st.PHASER_COLOR, st.PHASER_MARKER
@@ -181,7 +194,10 @@ def switch_pct(db, key):
 
 
 def n50_mb(db, key):
-    return db.get(key, "block_n50") / 1e6
+    """NG50 over the autosomes from plots/ng50_autosomes.py. whatshap's own
+    block_n50 is not a fallback: on GRCh38 it counts chrX into the genome and
+    on T2T it does not, so the two would not compare."""
+    return db.get(key, "block_ng50") / 1e6
 
 
 def truth_phased_pct(db, key):
@@ -191,7 +207,12 @@ def truth_phased_pct(db, key):
 
 
 def tagged_pct(db, key):
-    return 100 * db.get(key, "tagging_completeness")
+    """Reads on chr1-22 tagged in a block of two SNPs or more (bin/autosomes.sh)."""
+    return 100 * db.get(key, "tagging_completeness_min")
+
+
+def tagged_bases_pct(db, key):
+    return 100 * db.get(key, "bases_tagged_fraction")
 
 
 def read_precision_pct(db, key):
@@ -203,10 +224,14 @@ def read_recall_pct(db, key):
 
 
 def fnr_pct(db, key):
+    if key and key[0] == "call":
+        return 100 * db.call(key[1], key[2], key[3], key[4], "fnr")
     return 100 * db.get(key, "fnr")
 
 
 def fdr_pct(db, key):
+    if key and key[0] == "call":
+        return 100 * db.call(key[1], key[2], key[3], key[4], "fdr")
     return 100 * db.get(key, "fdr")
 
 
@@ -236,7 +261,15 @@ def fig2b(db, ctx, ref):
 
 
 def fig7a(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig7a_reads_tagged_" + ref, ref,
+    """By bases: a read without a het SNP on it cannot be tagged, and counting
+    reads weighs the many short ONT reads like long ones (figS4 has the read
+    count)."""
+    return coverage_lines(db, ctx, "fig7a_bases_tagged_" + ref, ref,
+                          tagged_bases_pct, "Read bases assigned\na haplotype (%)", "platform")
+
+
+def figS4(db, ctx, ref):
+    return coverage_lines(db, ctx, "figS4_reads_tagged_" + ref, ref,
                           tagged_pct, "Reads assigned a haplotype (%)", "platform")
 
 
@@ -344,7 +377,7 @@ def fig4(db, ctx, ref, caller="truth"):
         plt.close(fig)
         raise NoData("no switch/flip counts for %s at %d×" % (ref, depth))
 
-    axes[0].set_ylabel("Errors per 100 het SNP\npairs, %d×" % depth)
+    axes[0].set_ylabel("Errors per 100 pairs\nof het SNPs, %d×" % depth)
     axes[0].set_ylim(bottom=0)
     top_legend(legend_ax, [
         Patch(facecolor=st.MUTED, edgecolor="white", label="Switch error (wrong stretch)"),
@@ -358,13 +391,22 @@ def figS1(db, ctx, ref, caller="truth"):
     the only variability these numbers come with."""
     depth = ctx.depth
     rng = np.random.RandomState(0)
+    every = [100 * r for platform in st.PLATFORMS for phaser in st.PHASERS
+             for r in db.chromosome_switch_rates((ref, caller, platform, depth, phaser))]
+    if not every:
+        raise NoData("no per-chromosome compare for %s at %d×" % (ref, depth))
+    # an autosome without a switch is 0, which a log axis cannot show: it is
+    # drawn on a line of its own below the smallest rate, labelled 0, and kept
+    # in the box statistics there instead of being dropped
+    positive_rates = [r for r in every if r > 0]
+    floor = (min(positive_rates) if positive_rates else 1e-4) / 3
     fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 6)
     values = []
     for ax, platform in zip(axes, st.PLATFORMS):
         here = 0
         for i, phaser in enumerate(st.PHASERS):
-            rates = [100 * r for r in
-                     db.chromosome_switch_rates((ref, caller, platform, depth, phaser)) if r > 0]
+            rates = [max(100 * r, floor) for r in
+                     db.chromosome_switch_rates((ref, caller, platform, depth, phaser))]
             if not rates:
                 continue
             color = st.PHASER_COLOR[phaser]
@@ -388,7 +430,13 @@ def figS1(db, ctx, ref, caller="truth"):
         raise NoData("no per-chromosome compare for %s at %d×" % (ref, depth))
 
     axes[0].set_yscale("log")
-    log_ticks(axes[0].yaxis, min(values), max(values))
+    log_ticks(axes[0].yaxis, floor, max(values))
+    ticks = [t for t in axes[0].get_yticks() if floor * 1.5 < t <= max(values) * 1.5]
+    axes[0].set_yticks([floor] + ticks)
+    axes[0].set_yticklabels(["0"] + ["%g" % t for t in ticks])
+    axes[0].set_ylim(floor / 1.6, max(values) * 1.6)
+    for ax in axes:
+        ax.axhline(floor * 1.25, color=st.GRID, linewidth=0.6, linestyle=(0, (2, 2)), zorder=1)
     axes[0].set_ylabel("Switch error rate per\nautosome (%%), %d×" % depth)
     return save(fig, ctx, "figS1_switch_rate_per_chromosome_%dx_%s" % (depth, ref))
 
@@ -435,14 +483,31 @@ def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, label=No
         ax.annotate(label, xy=(start + (n - 1) / 2, 1), xycoords=ax.get_xaxis_transform(),
                     xytext=(0, 3), textcoords="offset points", ha="center", va="bottom")
         start += n
-    start = 0
-    widest = max(len(str(l)) for l in row_labels)
-    for label, n in row_groups:
-        ax.annotate(label, xy=(0, start + (n - 1) / 2), xycoords=ax.get_yaxis_transform(),
-                    xytext=(-(widest * 3.6 + 12), 0), textcoords="offset points",
-                    rotation=90, ha="center", va="center")
-        start += n
+    group_labels_left(ax, row_groups)
     return im
+
+
+def label_width_pt(ax, labels):
+    """Width of the widest of these text objects in points, measured with the
+    font in use - a guess from the number of letters breaks with a wider font."""
+    renderer = ax.figure.canvas.get_renderer()
+    widths = [t.get_window_extent(renderer).width for t in labels if t.get_text()]
+    return max(widths) * 72 / ax.figure.dpi if widths else 0
+
+
+def group_labels_left(ax, groups, positions=None):
+    """A vertical label for each group of rows, left of the row labels.
+    positions: the y of every row; default 0, 1, 2, ..."""
+    if not any(label for label, _ in groups):
+        return
+    offset = label_width_pt(ax, ax.get_yticklabels()) + 3 + ax.yaxis.get_tick_padding() + 4
+    start = 0
+    for label, n in groups:
+        ys = positions[start:start + n] if positions is not None else [start, start + n - 1]
+        ax.annotate(label, xy=(0, (ys[0] + ys[-1]) / 2), xycoords=ax.get_yaxis_transform(),
+                    xytext=(-offset, 0), textcoords="offset points",
+                    rotation=90, ha="center", va="bottom", rotation_mode="anchor")
+        start += n
 
 
 def log_norm(values):
@@ -572,35 +637,48 @@ def figS0(db, ctx, ref):
     return save(fig, ctx, "figS0_grid_completeness_" + ref)
 
 
+def strata_heatmap(ctx, name, strata, value, bar_label, **image):
+    """Platform x phaser down, one stratum per column: 16 rows of wide cells, so
+    every value fits its cell. value(platform, phaser, stratum) -> number; 0 is a
+    result (no error in the stratum), drawn in the lightest colour and written
+    as 0, and only NaN is hatched as not computed."""
+    rows = [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS]
+    matrix = [[value(pl, p, s) for s in strata] for pl, p in rows]
+    kept = [j for j in range(len(strata)) if any(finite(line[j]) for line in matrix)]
+    if not kept:
+        return None
+    strata = [strata[j] for j in kept]
+    matrix = [[line[j] for j in kept] for line in matrix]
+    shown = [v for line in matrix for v in line if finite(v) and v > 0]
+    floor = min(shown) / 2 if shown else 1.0
+    matrix = [[floor if finite(v) and v <= 0 else v for v in line] for line in matrix]
+    if "norm" not in image:
+        image["norm"] = log_norm(shown + [floor])
+    fig, ax = plt.subplots(figsize=((62 + 13 * len(strata)) * st.MM, 100 * st.MM),
+                           constrained_layout=True)
+    im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows],
+                 [stratum_label(s) for s in strata],
+                 [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
+                 [("", len(strata))], label=lambda v: "0" if v <= floor else short_number(v),
+                 **image)
+    plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
+    colorbar(fig, im, ax, bar_label)
+    return save(fig, ctx, name)
+
+
 def fig8(db, ctx, ref, caller="truth"):
     depth = ctx.depth
-    strata = db.strata_names()
-    cols = [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS]
-    matrix = []
-    for stratum in strata:
-        line = []
-        for platform, phaser in cols:
-            row = db.stratum((ref, caller, platform, depth, phaser), stratum)
-            rate = ratio(row["switches"], row["assessed"]) if row else NAN
-            line.append(positive(100 * rate))
-        matrix.append(line)
-    kept = [i for i, line in enumerate(matrix) if any(finite(v) for v in line)]
-    if not kept:
-        raise NoData("no metrics_strata rows for %s at %d× - regions.sh has not run" % (ref, depth))
-    matrix = [matrix[i] for i in kept]
-    strata = [strata[i] for i in kept]
-    values = [v for line in matrix for v in line if finite(v)]
 
-    fig, ax = plt.subplots(
-        figsize=(st.FULL_WIDTH * st.MM, (34 + 5.5 * len(strata)) * st.MM), constrained_layout=True)
-    im = heatmap(ax, matrix, [stratum_label(s) for s in strata],
-                 [st.PHASER_LABEL[p] for _, p in cols],
-                 [("", len(strata))],
-                 [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
-                 label=short_number, cmap=st.SEQUENTIAL, norm=log_norm(values))
-    plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
-    colorbar(fig, im, ax, "Switch error rate (%%), %d×" % depth)
-    return save(fig, ctx, "fig8_switch_rate_by_stratum_%dx_%s" % (depth, ref))
+    def rate(platform, phaser, stratum):
+        row = db.stratum((ref, caller, platform, depth, phaser), stratum)
+        return 100 * ratio(row["switches"], row["assessed"]) if row else NAN
+
+    out = strata_heatmap(ctx, "fig8_switch_rate_by_stratum_%dx_%s" % (depth, ref),
+                         db.strata_names(), rate, "Switch error rate (%%), %d×" % depth,
+                         cmap=st.SEQUENTIAL)
+    if out is None:
+        raise NoData("no metrics_strata rows for %s at %d× - regions.sh has not run" % (ref, depth))
+    return out
 
 
 STRATUM_LABEL = {
@@ -608,7 +686,7 @@ STRATUM_LABEL = {
     "alldifficultregions": "All difficult regions",
     "segdups": "Segmental duplications",
     "lowmappabilityall": "Low mappability",
-    "AllTandemRepeatsandHomopolymers_slop5": "Tandem repeats and homopolymers",
+    "AllTandemRepeatsandHomopolymers_slop5": "Tandem repeats and\nhomopolymers",
     "satellites_slop5": "Satellites",
     "MHC": "MHC",
     "chrX_nonPAR": "chrX non-PAR",
@@ -638,12 +716,17 @@ def strata_rows(db, ref):
 
 
 def strata_axes(n, legend=0):
-    """legend: how many rows of legend go on top."""
-    height = 16 + 6.5 * n + 5 * legend
-    if legend:
-        return legend_panel(92, height, legend_rows=legend)
+    """One column wide; legend: how many rows of legend go above the bars."""
+    height = 18 + 7 * n + 4.5 * legend
     fig, ax = plt.subplots(figsize=(92 * st.MM, height * st.MM), constrained_layout=True)
-    return fig, None, ax
+    return fig, ax
+
+
+def legend_above(ax, handles, ncol):
+    """A legend over the plotting area itself, not over the whole figure, so it
+    stays above the bars however wide the stratum names are."""
+    ax.legend(handles=handles, loc="lower left", bbox_to_anchor=(0, 1.02), ncol=ncol,
+              borderaxespad=0, columnspacing=1.0)
 
 
 def strata_y(ax, names):
@@ -670,7 +753,7 @@ def figS3a(db, ctx, ref):
     if not values:
         raise NoData("no stratum sizes for %s" % ref)
     left = 10 ** math.floor(math.log10(min(values) / 2))
-    fig, legend_ax, ax = strata_axes(len(names), legend=1)
+    fig, ax = strata_axes(len(names), legend=1)
     for i, (r, k) in enumerate(zip(raw, kept)):
         if finite(r):
             ax.barh(i, r - left, left=left, height=0.7, color=STRATA_LIGHT, zorder=2)
@@ -683,37 +766,67 @@ def figS3a(db, ctx, ref):
     log_ticks(ax.xaxis, left, max(values) * 4)
     ax.set_xlabel("Size (Mb)")
     strata_y(ax, names)
-    top_legend(legend_ax, [Patch(facecolor=STRATA_LIGHT, label="Whole stratum"),
-                           Patch(facecolor=STRATA_DARK, label="Inside the confident regions")])
+    legend_above(ax, [Patch(facecolor=STRATA_LIGHT, label="Whole stratum"),
+                      Patch(facecolor=STRATA_DARK, label="In confident regions")], ncol=2)
     return save(fig, ctx, "figS3a_strata_size_" + ref)
 
 
+def strata_bars(ctx, ref, name, names, values, xlabel, text, log=False):
+    """One bar per stratum, the bar's own value written at its end."""
+    if not any(finite(v) for v in values):
+        return None
+    fig, ax = strata_axes(len(names))
+    top = max(v for v in values if finite(v))
+    low = min(v for v in values if finite(v) and v > 0) if log else 0
+    left = 10 ** math.floor(math.log10(low / 2)) if log else 0
+    for i, v in enumerate(values):
+        if not finite(v):
+            continue
+        ax.barh(i, v - left, left=left, height=0.7, color=STRATA_DARK, zorder=3)
+        ax.annotate(text(i, v), xy=(v, i), xytext=(3, 0), textcoords="offset points",
+                    va="center", color=st.INK)
+    if log:
+        ax.set_xscale("log")
+        ax.set_xlim(left, top * 30)
+        log_ticks(ax.xaxis, left, top * 30)
+    else:
+        ax.set_xlim(0, top * 1.35)
+    ax.set_xlabel(xlabel)
+    strata_y(ax, names)
+    return save(fig, ctx, name + "_" + ref)
+
+
 def figS3b(db, ctx, ref):
-    """Density of the truth het SNPs, with how many there are: a rate over a
-    few thousand sites is not as firm as one over a million."""
+    """Density of the truth het SNPs: where SNPs are sparse, blocks break."""
     names, stats = strata_rows(db, ref)
-    density = [stats[s]["het_snps_per_mb"] for s in names]
-    count = [stats[s]["truth_het_snps"] for s in names]
+    out = strata_bars(ctx, ref, "figS3b_strata_het_snp_density", names,
+                      [stats[s]["het_snps_per_mb"] for s in names],
+                      "Truth het SNPs per Mb", lambda i, v: thousands(v))
+    if out is None:
+        raise NoData("no het SNP density for %s" % ref)
+    return out
+
+
+def figS3g(db, ctx, ref):
+    """How many truth het SNPs each stratum has, and their share of all of
+    them: a rate over a few thousand sites is not as firm as one over a
+    million."""
+    names, stats = strata_rows(db, ref)
+    count = [positive(stats[s]["truth_het_snps"]) for s in names]
     total = NAN
     if "alldifficultregions" in stats and "notinalldifficultregions" in stats:
         total = stats["alldifficultregions"]["truth_het_snps"] + \
             stats["notinalldifficultregions"]["truth_het_snps"]
-    if not any(finite(v) for v in density):
-        raise NoData("no het SNP density for %s" % ref)
-    fig, _, ax = strata_axes(len(names))
-    top = max(v for v in density if finite(v))
-    for i, (d, n) in enumerate(zip(density, count)):
-        if not finite(d):
-            continue
-        ax.barh(i, d, height=0.7, color=STRATA_DARK, zorder=3)
-        text = thousands(n)
-        if finite(total) and total:
-            text += " (%s%%)" % short_number(100 * n / total)
-        ax.text(d + top * 0.02, i, text, va="center", color=st.INK)
-    ax.set_xlim(0, top * 1.6)
-    ax.set_xlabel("Truth het SNPs per Mb")
-    strata_y(ax, names)
-    return save(fig, ctx, "figS3b_strata_het_snps_" + ref)
+
+    def text(i, v):
+        share = " (%s%%)" % short_number(100 * v / total) if finite(total) and total else ""
+        return thousands(v) + share
+
+    out = strata_bars(ctx, ref, "figS3g_strata_het_snp_count", names, count,
+                      "Truth het SNPs", text, log=True)
+    if out is None:
+        raise NoData("no het SNP counts for %s" % ref)
+    return out
 
 
 COMPOSITION = [
@@ -730,7 +843,7 @@ def figS3c(db, ctx, ref):
     benchmark does with it. Only the darkest part is scored; the rest is
     variation the per-stratum numbers say nothing about."""
     names, stats = strata_rows(db, ref)
-    fig, legend_ax, ax = strata_axes(len(names), legend=3)
+    fig, ax = strata_axes(len(names), legend=3)
     drawn = 0
     for i, s in enumerate(names):
         r = stats[s]
@@ -755,8 +868,8 @@ def figS3c(db, ctx, ref):
     ax.set_xticks([0, 25, 50, 75, 100])
     ax.set_xlabel("GIAB truth variants in the stratum (%)")
     strata_y(ax, names)
-    top_legend(legend_ax, [Patch(facecolor=c, edgecolor=st.GRID, linewidth=0.4, label=l)
-                           for l, c in COMPOSITION], ncol=2)
+    legend_above(ax, [Patch(facecolor=c, edgecolor=st.GRID, linewidth=0.4, label=l)
+                      for l, c in COMPOSITION], ncol=2)
     return save(fig, ctx, "figS3c_strata_composition_" + ref)
 
 
@@ -766,7 +879,7 @@ def strata_dots(db, ctx, ref, name, column, scale, xlabel, fmt, log):
     values = [positive(v) if log else v for v in values]
     if not any(finite(v) for v in values):
         raise NoData("no %s for %s" % (column, ref))
-    fig, _, ax = strata_axes(len(names))
+    fig, ax = strata_axes(len(names))
     for i, v in enumerate(values):
         if not finite(v):
             continue
@@ -863,11 +976,7 @@ def fig5d(db, ctx, ref):
     first.set_yticks(ypos)
     first.set_yticklabels([st.PHASER_LABEL[p] for _, p in rows])
     first.set_ylim(ypos[-1] + 0.7, ypos[0] - 0.7)
-    for i, caller in enumerate(st.CALLERS):
-        block = ypos[i * len(st.PHASERS):(i + 1) * len(st.PHASERS)]
-        first.annotate(st.CALLER_LABEL[caller], xy=(0, sum(block) / len(block)),
-                       xycoords=first.get_yaxis_transform(), xytext=(-46, 0),
-                       textcoords="offset points", rotation=90, ha="center", va="center")
+    group_labels_left(first, [(st.CALLER_LABEL[c], len(st.PHASERS)) for c in st.CALLERS], ypos)
     top_legend(legend_ax, [
         Line2D([], [], color="none", marker="o", markerfacecolor="white",
                markeredgecolor=st.MUTED, markeredgewidth=0.9, label="Called as het SNP"),
@@ -938,7 +1047,7 @@ def reference_scatter(db, ctx, name, value, label, log):
     for platform in st.PLATFORMS:
         for phaser in st.PHASERS:
             xs, ys = [], []
-            for caller in st.CALLERS:
+            for caller in ("truth",):     # see reference_pairs
                 for depth in st.DEPTHS:
                     x = value(db, (a, caller, platform, depth, phaser))
                     y = value(db, (b, caller, platform, depth, phaser))
@@ -1012,13 +1121,16 @@ BAND = 1.1  # the shaded band: T2T within 10% of GRCh38
 
 def reference_pairs(db, value):
     """(GRCh38, T2T) for every run computed on both, by (platform, phaser);
-    the callers and depths of a cell are its points."""
+    the depths of a cell are its points. Truth input only: the two references
+    were aligned differently (GRCh38 BAMs as their providers aligned them, T2T
+    by us with minimap2), and Clair3 reacts to that; with the truth as input
+    no caller stands between the reads and the comparison."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     pairs = {}
     for platform in st.PLATFORMS:
         for phaser in st.PHASERS:
             pts = []
-            for caller in st.CALLERS:
+            for caller in ("truth",):
                 for depth in st.DEPTHS:
                     x = positive(value(db, (a, caller, platform, depth, phaser)))
                     y = positive(value(db, (b, caller, platform, depth, phaser)))
@@ -1029,14 +1141,6 @@ def reference_pairs(db, value):
     if not pairs:
         raise NoData("no run is computed on both %s and %s" % tuple(st.REFERENCES))
     return pairs
-
-
-def legend_panel(width, height, legend_rows=1):
-    fig = plt.figure(figsize=(width * st.MM, height * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, 1, height_ratios=[0.08 * legend_rows, 1])
-    legend_ax = fig.add_subplot(grid[0])
-    legend_ax.axis("off")
-    return fig, legend_ax, fig.add_subplot(grid[1])
 
 
 def identity_axes(ax, lo, hi, label):
@@ -1059,7 +1163,7 @@ def reference_scatter_file(db, ctx, name, value, label, cells, style_of, handles
     pairs = reference_pairs(db, value)
     seen = [v for pts in pairs.values() for p in pts for v in p]
     lo, hi = min(seen) / 1.3, max(seen) * 1.3
-    fig, legend_ax, ax = legend_panel(88, 98, legend_rows=2)
+    fig, ax = plt.subplots(figsize=(88 * st.MM, 96 * st.MM), constrained_layout=True)
     drawn = 0
     for platform, phaser in cells:
         pts = pairs.get((platform, phaser))
@@ -1074,7 +1178,9 @@ def reference_scatter_file(db, ctx, name, value, label, cells, style_of, handles
         plt.close(fig)
         raise NoData("none of these runs is computed on both references")
     identity_axes(ax, lo, hi, label)
-    top_legend(legend_ax, handles, ncol=3 if len(handles) == 6 else min(len(handles), 4))
+    # over the square plot, two or three to a row: one row of four is wider
+    # than the plot and would stretch the figure around it
+    legend_above(ax, handles, ncol=3 if len(handles) in (3, 6) else 2)
     return save(fig, ctx, name)
 
 
@@ -1238,9 +1344,11 @@ FIGURES = [
     ("fig8", fig8, True),
     ("figS3a", figS3a, True),
     ("figS3b", figS3b, True),
+    ("figS3g", figS3g, True),
     ("figS3c", figS3c, True),
     ("figS3d", figS3d, True),
     ("figS3e", figS3e, True),
     ("figS3f", figS3f, True),
     ("figS1", figS1, True),
+    ("figS4", figS4, True),
 ]

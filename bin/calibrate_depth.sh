@@ -24,10 +24,18 @@ CAL_WHATSHAP_CAPS=(${CAL_WHATSHAP_CAPS:-15 16 17 18 19 20})
 CAL_MARGIN_DEPTHS=(${CAL_MARGIN_DEPTHS:-32 40 50})
 CAL_TIMEOUT="${CAL_TIMEOUT:-6h}"
 
+# chr20 of the WGS truth, cut once (the names are those of the old chr20 runs)
 truth_phased="${DERIVED_DIR}/chr20.phased.vcf.gz"
 truth_unphased="${DERIVED_DIR}/chr20.unphased.vcf.gz"
-require_file "${truth_phased}" "chr20 phased truth - run bin/run_chr20.sh once"
-require_file "${truth_unphased}" "chr20 unphased truth"
+for kind in phased unphased; do
+  src="${TRUTH_PHASED}"; [[ "${kind}" == unphased ]] && src="${TRUTH_UNPHASED}"
+  dst="${DERIVED_DIR}/chr20.${kind}.vcf.gz"
+  is_done "${dst}" && continue
+  require_file "${src}" "${kind} truth - run bin/make_truth.sh"
+  "${BCFTOOLS}" view -r chr20 -Oz -o "${dst}.tmp" "${src}"
+  mv -f "${dst}.tmp" "${dst}"
+  "${TABIX}" -f -p vcf "${dst}"
+done
 
 work="${TMP_DIR}/calibrate"
 out="${METRICS_DIR}/calibration.tsv"
@@ -37,10 +45,11 @@ mkdir -p "${work}" "${METRICS_DIR}" "${LOGS_DIR}/calibrate"
   || printf 'phaser\tcap\tplatform\tdepth\tseconds\tcovered\thamming\thamming_rate\tblocks\n' >"${out}"
 
 # chr20 slice of the BAM, so margin does not walk the whole genome and the two
-# phasers are timed on the same input
+# phasers are timed on the same input. One per platform and depth: a slice
+# named by platform alone would be reused, silently, for another CAL_DEPTH.
 slice_bam() {
   local platform="$1"
-  local bam="${work}/${platform}.chr20.bam"
+  local bam="${work}/${platform}.${CAL_DEPTH}x.chr20.bam"
   [[ -s "${bam}.bai" ]] && { printf '%s\n' "${bam}"; return 0; }
   "${SAMTOOLS}" view -@ "${SORT_THREADS}" -b \
       -o "${bam}" "$(sub_bam "${platform}" "${REFERENCE_NAME}" "${CAL_DEPTH}")" chr20

@@ -208,7 +208,8 @@ MINIMAP2="/autofs/bal36/dten/bin/minimap2-2.31_x64-linux/minimap2"
 
 T2T_NAME="T2T"
 T2T_SRC_DIR="${DATA_DIR}/t2t_source"
-MMI_DIR="${DATA_DIR}/t2t_index"
+# the minimap2 index of CHM13 is the same for every sample
+MMI_DIR="${PROJECT_ROOT}/data/t2t_index"
 
 ALIGN_THREADS="${ALIGN_THREADS:-32}"
 SORT_THREADS="${SORT_THREADS:-8}"

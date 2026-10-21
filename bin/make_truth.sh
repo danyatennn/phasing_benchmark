@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Produces the phased truth VCF and the unphased phaser input VCF, checks possible leaks
+# You can run it as, for example:
 #   bash bin/make_truth.sh GRCh38
 #   REFERENCE_NAME=T2T bash bin/make_truth.sh T2T
 
@@ -21,11 +23,21 @@ mkdir -p "${DERIVED_DIR}"
 log "${REFERENCE_NAME}: heterozygous biallelic SNPs from $(basename "${TRUTH_SRC_VCF}")"
 "${BCFTOOLS}" view \
     -T "${CONFIDENT_BED}" \
-    -p \
-    -m2 -M2 -v snps -g het \
-    "${TRUTH_SRC_VCF}" \
+    -p -m2 -M2 -v snps -g het "${TRUTH_SRC_VCF}" \
 | "${BCFTOOLS}" annotate -x 'INFO,^FORMAT/GT' -Oz -o "${TRUTH_PHASED}"
 "${TABIX}" -f -p vcf "${TRUTH_PHASED}"
+
+truth_sample="$("${BCFTOOLS}" query -l "${TRUTH_PHASED}")"
+[[ "$(printf '%s\n' "${truth_sample}" | wc -l)" -eq 1 ]] \
+  || die "truth VCF has more than one sample: ${truth_sample}"
+if [[ "${truth_sample}" != "${SAMPLE}" ]]; then
+  log "renaming the truth sample ${truth_sample} -> ${SAMPLE}"
+  printf '%s\n' "${SAMPLE}" >"${TRUTH_PHASED}.name"
+  "${BCFTOOLS}" reheader -s "${TRUTH_PHASED}.name" -o "${TRUTH_PHASED}.tmp" "${TRUTH_PHASED}"
+  mv -f "${TRUTH_PHASED}.tmp" "${TRUTH_PHASED}"
+  rm -f "${TRUTH_PHASED}.name"
+  "${TABIX}" -f -p vcf "${TRUTH_PHASED}"
+fi
 
 # unphased phaser input
 log "stripping phase to build the phaser input"

@@ -62,8 +62,14 @@ dipcall_one() {
     | sort -k1,1 -k2,2n >"${pre}.blk.dip.bed"
   bed_intersect "${CONFIDENT_BED}" "${pre}.blk.dip.bed" >"${pre}.blk.region.bed"
 
+  # dipcall copies REF from the FASTA, and CHM13 is soft-masked: 62% of the
+  # alleles come out lower case. whatshap compare matches alleles case by case
+  # and silently drops those sites, so they are written in upper case here -
+  # the case only marks repeats, the base is the same
   "${BCFTOOLS}" view -T "${pre}.blk.region.bed" -m2 -M2 -v snps -g het "${pre}.dip.vcf.gz" \
-    | "${BCFTOOLS}" annotate -x 'INFO,^FORMAT/GT' >"${pre}.blk.snps.vcf"
+    | "${BCFTOOLS}" annotate -x 'INFO,^FORMAT/GT' \
+    | awk -F'\t' -v OFS='\t' '/^#/ { print; next } { $4 = toupper($4); $5 = toupper($5); print }' \
+    >"${pre}.blk.snps.vcf"
 
   # which contig each haplotype has where: its long alignments (>= 50 kb,
   # mapQ >= 5), the same ones dipcall builds dip.bed from

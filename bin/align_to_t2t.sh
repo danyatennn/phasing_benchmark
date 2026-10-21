@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# The T2T sources: every source BAM of the sample (its GRCh38 one) turned back
+# into reads and aligned to CHM13 with minimap2 (lr:hq for ONT, map-hifi for
+# PacBio), into data/t2t_source/<platform>.bam. Only the alignment: the depth
+# and the downsampling are the same steps as on GRCh38 (bin/measure_sources.sh,
+# downsample.sh), both run by bin/run_reference.sh. A source that exists is kept.
+#
+#   bash bin/align_to_t2t.sh
+#   PHASING_PLATFORMS=ont4k bash bin/align_to_t2t.sh
 
 set -euo pipefail
 
@@ -8,8 +16,8 @@ source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline
 source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
-require_vars SAMPLE SAMTOOLS MOSDEPTH PARALLEL MINIMAP2 REF_CHM13
-require_cmds "${SAMTOOLS}" "${MOSDEPTH}" "${PARALLEL}" "${MINIMAP2}"
+require_vars SAMPLE SAMTOOLS MINIMAP2 REF_CHM13
+require_cmds "${SAMTOOLS}" "${MINIMAP2}"
 require_file "${REF_CHM13}" "T2T reference"
 
 mkdir -p "${T2T_SRC_DIR}" "${MMI_DIR}"
@@ -57,38 +65,8 @@ align_source() {
   mv -f "${out}.tmp.bai" "${out}.bai"
 }
 
-measure_sources() {
-  local platform complete=1
-  for platform in "${PLATFORMS[@]}"; do
-    [[ -s "${DEPTH_TSV}" && -n "$(source_depth "${platform}")" ]] || complete=0
-  done
-  [[ "${complete}" == 1 ]] \
-    && { log "T2T source depth: cached in ${DEPTH_TSV}"; return 0; }
-
-  local tmp="${DATA_DIR}/.source_depth_T2T_tmp"
-  rm -rf "${tmp}"; mkdir -p "${tmp}"
-
-  log "measuring T2T source depth: ${PLATFORMS[*]}"
-  export -f measure_depth die
-  export MOSDEPTH MOSDEPTH_THREADS="${DEPTH_THREADS}"
-  "${PARALLEL}" -j "${#PLATFORMS[@]}" \
-      "measure_depth ${T2T_SRC_DIR}/{}.bam > ${tmp}/{}" ::: "${PLATFORMS[@]}" \
-    || die "T2T source depth measurement failed"
-
-  printf 'platform\tmean_depth\n' >"${DEPTH_TSV}"
-  for platform in "${PLATFORMS[@]}"; do
-    printf '%s\t%s\n' "${platform}" "$(<"${tmp}/${platform}")" >>"${DEPTH_TSV}"
-    log "  ${platform}: $(<"${tmp}/${platform}")x"
-  done
-  rm -rf "${tmp}"
-}
-
-log "aligning ${#PLATFORMS[@]} sources to $(basename "${REF_CHM13}")"
+log "${SAMPLE}: aligning ${#PLATFORMS[@]} sources to $(basename "${REF_CHM13}")"
 for platform in "${PLATFORMS[@]}"; do
   align_source "${platform}"
 done
-
-measure_sources
-
-log "handing the grid to downsample.sh (REFERENCE_NAME=${REFERENCE_NAME})"
-REFERENCE_NAME="${REFERENCE_NAME}" bash "${PROJECT_ROOT}/downsample.sh"
+log "T2T sources: ${T2T_SRC_DIR}"
