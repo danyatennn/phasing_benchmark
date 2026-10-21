@@ -1184,16 +1184,30 @@ def reference_scatter_file(db, ctx, name, value, label, cells, style_of, handles
     return save(fig, ctx, name)
 
 
+FINE_RATIO_TICKS = [0.9, 0.92, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1, 1.01, 1.02, 1.03, 1.04,
+                    1.05, 1.06, 1.08, 1.1]
+
+
 def ratio_axis(ax, ratios, label):
-    """Log ratio, symmetric about 1, the band of +-10% shaded."""
+    """Log ratio, symmetric about 1 and zoomed to the data: a spread of 2% gets an
+    axis of about +-3%, not the +-25% it used to get, so the boxes stay readable.
+    The band of +-10% is shaded only when it fits inside the axis; on a zoomed
+    axis every point is within 10% anyway."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     span = max(abs(math.log10(r)) for r in ratios)
-    span = max(span * 1.15, math.log10(1.25))
+    span = max(span * 1.25, math.log10(1.03))
+    lo, hi = 10 ** -span, 10 ** span
     ax.set_yscale("log")
-    ax.set_ylim(10 ** -span, 10 ** span)
-    ax.axhspan(1 / BAND, BAND, color=st.GRID, linewidth=0, zorder=0)
+    ax.set_ylim(lo, hi)
+    if BAND < hi * 0.97:
+        ax.axhspan(1 / BAND, BAND, color=st.GRID, linewidth=0, zorder=0)
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
-    ax.set_yticks([t for t in RATIO_TICKS if 10 ** -span <= t <= 10 ** span])
+    ticks = [t for t in RATIO_TICKS if lo <= t <= hi]
+    if len(ticks) < 4:
+        ticks = [t for t in FINE_RATIO_TICKS if lo <= t <= hi]
+        while len(ticks) > 7:
+            ticks = ticks[::2] if 1 in ticks[::2] else ticks[1::2]
+    ax.set_yticks(ticks)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
     ax.yaxis.set_minor_locator(NullLocator())
     ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
@@ -1201,10 +1215,18 @@ def ratio_axis(ax, ratios, label):
 
 def reference_box_file(db, ctx, name, value, label, groups):
     """groups: [(group label, [(box label, colour, [(platform, phaser), ...])])].
-    A box is the middle half of the ratios, its whiskers reach the furthest
-    ratio within 1.5 box lengths, the black bar is the median, written above."""
+    Every point is one run on both references (same platform, coverage and
+    phaser); a box pools the coverages. The box is the middle half of the
+    ratios, its whiskers reach the furthest ratio within 1.5 box lengths, the
+    black bar is the median, written above as the change on T2T in percent."""
     pairs = reference_pairs(db, value)
     all_ratios = [y / x for pts in pairs.values() for x, y in pts]
+    def change(m):
+        """The median ratio as a change on T2T: 0.91 -> -9%, 1.013 -> +1.3%. A
+        percent cannot be read as a coverage, as 0.91x could."""
+        pct = 100 * (m - 1)
+        text = ("%+.1f%%" if abs(pct) < 10 else "%+.0f%%") % pct
+        return text.replace("-", "\u2212")
     boxes = sum(len(boxes) for _, boxes in groups)
     fig, ax = plt.subplots(figsize=((34 + 11 * boxes) * st.MM, 70 * st.MM),
                            constrained_layout=True)
@@ -1223,7 +1245,7 @@ def reference_box_file(db, ctx, name, value, label, groups):
                            capprops=dict(color=color, linewidth=0.8))
                 ax.scatter(pos + rng.uniform(-0.2, 0.2, len(r)), r, s=5, color=color,
                            edgecolor="white", linewidth=0.3, alpha=0.8, zorder=4)
-                ax.annotate("%.2f×" % float(np.median(r)), xy=(pos, 1),
+                ax.annotate(change(float(np.median(r))), xy=(pos, 1),
                             xycoords=ax.get_xaxis_transform(), xytext=(0, 2),
                             textcoords="offset points", ha="center", va="bottom")
             ticks.append(pos)
