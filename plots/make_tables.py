@@ -260,10 +260,26 @@ def t00_completeness(dbs):
     return t
 
 
+def n50(values):
+    """The value at which the sorted values (largest first) cover half their sum."""
+    s = sorted(values)
+    half, acc = sum(s) / 2, 0
+    for v in reversed(s):
+        acc += v
+        if acc >= half:
+            return v
+    return 0
+
+
 def read_table_stats(path):
-    """Primary alignments on chr1-22 of one read table (plots/read_table.py)."""
+    """Primary alignments on chr1-22 of one read table (plots/read_table.py).
+    Read length counts the whole read, clips included; the aligned span (end -
+    start on the reference) is what can link het SNPs, and the two part when
+    long reads align only in pieces (soft-clipped, the rest as supplementary
+    alignments)."""
     lengths = array("l")
-    mapq20 = nm = aligned = 0
+    spans = array("l")
+    mapq20 = nm = aligned = aligned_all = softclip = 0
     bq = []
     with open_text(path) as fh:
         header = fh.readline().rstrip("\n").split("\t")
@@ -273,6 +289,9 @@ def read_table_stats(path):
             if not is_autosome(f[col["chrom"]]):
                 continue
             lengths.append(int(f[col["length"]]))
+            spans.append(int(f[col["end"]]) - int(f[col["start"]]))
+            aligned_all += int(f[col["aligned"]])
+            softclip += int(f[col["softclip"]])
             if int(f[col["mapq"]]) >= 20:
                 mapq20 += 1
             n, a = int(f[col["nm"]]), int(f[col["aligned"]])
@@ -286,16 +305,15 @@ def read_table_stats(path):
         return None
     s = sorted(lengths)
     total = sum(s)
-    half, acc, n50 = total / 2, 0, 0
-    for v in reversed(s):
-        acc += v
-        if acc >= half:
-            n50 = v
-            break
     return {
         "reads": len(s), "gb": total / 1e9, "mean_kb": total / len(s) / 1e3,
-        "median_kb": statistics.median(s) / 1e3, "n50_kb": n50 / 1e3,
+        "median_kb": statistics.median(s) / 1e3, "n50_kb": n50(s) / 1e3,
         "ge10kb_pct": 100 * sum(1 for v in s if v >= 10000) / len(s),
+        "ge50kb_pct": 100 * sum(1 for v in s if v >= 50000) / len(s),
+        "aligned_pct": 100 * aligned_all / total,
+        "softclip_pct": 100 * softclip / total,
+        "span_n50_kb": n50(spans) / 1e3,
+        "span_ge50kb_pct": 100 * sum(1 for v in spans if v >= 50000) / len(spans),
         "mapq20_pct": 100 * mapq20 / len(s),
         "identity_pct": 100 * (1 - nm / aligned) if aligned else NAN,
         "median_bq": statistics.median(bq) if bq else NAN,
@@ -321,12 +339,16 @@ def t01_datasets(root, inputs, samples, threads, with_reads=True):
               "Per sample and platform. Source depth: mean depth of the provider's BAM on GRCh38 "
               "(mosdepth, data/source_depth.tsv) and of our alignment to CHM13. Read statistics "
               "from the 30x GRCh38 cell, primary alignments on chr1-22 (reads/<cell>.reads.tsv.gz): "
-              "read N50 over read length, identity = 1 - NM / aligned bases. Achieved depths: "
+              "read N50 over read length (clips included); aligned: read bases in the "
+              "alignment, of all read bases; soft-clipped: likewise; aligned span: end - start of "
+              "the primary alignment on the reference, the stretch a read can link het SNPs over; "
+              "identity = 1 - NM / aligned bases. Achieved depths: "
               "mosdepth of the downsampled BAMs. Model and aligner as written in the BAM header.",
               ["sample", "platform", "basecaller_model", "aligner_grch38", "source_depth_grch38",
                "source_depth_t2t", "achieved_depths_grch38", "reads_30x", "gb_30x", "mean_kb",
-               "median_kb", "read_n50_kb", "reads_ge10kb_pct", "mapq_ge20_pct", "identity_pct",
-               "median_base_quality"])
+               "median_kb", "read_n50_kb", "reads_ge10kb_pct", "reads_ge50kb_pct", "aligned_pct",
+               "softclip_pct", "aligned_span_n50_kb", "span_ge50kb_pct", "mapq_ge20_pct",
+               "identity_pct", "median_base_quality"])
     jobs = []
     for sample in samples:
         sroot = sample_root(root, sample)
@@ -354,7 +376,9 @@ def t01_datasets(root, inputs, samples, threads, with_reads=True):
                   float(src38[p][0][-1]) if p in src38 else None,
                   float(srct2t[p][0][-1]) if p in srct2t else None, achieved,
                   s.get("reads"), s.get("gb"), s.get("mean_kb"), s.get("median_kb"), s.get("n50_kb"),
-                  s.get("ge10kb_pct"), s.get("mapq20_pct"), s.get("identity_pct"), s.get("median_bq"))
+                  s.get("ge10kb_pct"), s.get("ge50kb_pct"), s.get("aligned_pct"), s.get("softclip_pct"),
+                  s.get("span_n50_kb"), s.get("span_ge50kb_pct"), s.get("mapq20_pct"),
+                  s.get("identity_pct"), s.get("median_bq"))
     return t
 
 

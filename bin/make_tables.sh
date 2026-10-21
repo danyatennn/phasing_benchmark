@@ -40,7 +40,9 @@ sample_inputs() {   # <sample> <reference>
       printf '%s\t%s\t%s\t%s\n' "${SAMPLE}" "${REFERENCE_NAME}" "bam_${p}" "${bam}"
       header="$("${SAMTOOLS}" view -H "${bam}" 2>/dev/null)"
       model="$(grep -oE 'basecall_model=[^[:space:]]+|dna_r[0-9][^[:space:],]*' <<<"${header}" | sed 's/^basecall_model=//' | sort -u | head -1)"
-      aligner="$(grep '^@PG' <<<"${header}" | grep -oiE 'ID:(minimap2|pbmm2|winnowmap)[^[:space:]]*|VN:[^[:space:]]+' | head -2 | tr '\n' ' ' | sed 's/ $//')"
+      # the aligner's own @PG line: its program name and version, not those of ccs or samtools
+      aligner="$(grep '^@PG' <<<"${header}" | grep -iE 'PN:(minimap2|pbmm2|winnowmap)' | head -1 \
+        | awk -F'\t' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^PN:/) pn = substr($i, 4); if ($i ~ /^VN:/) vn = substr($i, 4) } print pn " " vn }')"
       printf '%s\t%s\t%s\t%s\n' "${SAMPLE}" "${REFERENCE_NAME}" "model_${p}" "${model}"
       printf '%s\t%s\t%s\t%s\n' "${SAMPLE}" "${REFERENCE_NAME}" "aligner_${p}" "${aligner}"
     done
@@ -70,13 +72,14 @@ set +e
 # versions: conda packages from conda-meta (name-version-build.json), the rest
 # from file names or --version; whatever cannot be read is '?'
 conda_versions() {   # <env bin dir> <package>...
-  local meta="$1/../conda-meta" pkg f
+  local meta="$1/../conda-meta" env pkg f
+  env="$(basename "$(dirname "$1")")"
   shift
   for pkg in "$@"; do
     f="$(ls "${meta}" 2>/dev/null | grep -E "^${pkg}-[0-9]" | head -1)"
     [[ -n "${f}" ]] || continue
     f="${f%.json}"; f="${f#${pkg}-}"
-    printf '%s\t%s\tconda %s\n' "${pkg}" "${f%%-*}" "$(basename "$(dirname "$1")")"
+    printf '%s\t%s\tconda %s\n' "${pkg}" "${f%%-*}" "${env}"
   done
 }
 first_version() {   # <command...>: the first x.y[.z] it prints
