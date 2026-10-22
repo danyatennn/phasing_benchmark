@@ -14,6 +14,9 @@ nothing to show raises NoData.
   fig11b  the same for phase block ends
   fig11c  why a stratum is hard: allele balance, paralog-like links, depth,
           low MAPQ, read errors (one file per platform)
+  fig12a-d T2T-CHM13 against GRCh38 on the whole genome and in each stratum:
+          switch rate, phase block ends, reads tagged, reads on the wrong
+          haplotype (the ratio of the two)
   fig9a-d the other GIAB samples at 30x: switch rate, NG50, read recall, FNR
 """
 
@@ -29,7 +32,7 @@ from matplotlib.ticker import FuncFormatter
 
 import style as st
 from data import NAN, ratio
-from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_ticks, panel_row,
+from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks, panel_row,
                      phaser_axis, phaser_handles, platform_handles, positive, save,
                      short_number, strata_heatmap, stratum_label, top_legend, y_grid)
 
@@ -38,7 +41,7 @@ CLASS_LABEL = {
     "lowmapq": "MAPQ < 20",
     "no_snp_outside_bed": "Outside confident regions",
     "no_snp": "No het SNP on the read",
-    "snps_unphased": "SNPs not phased (or single-SNP block)",
+    "snps_unphased": "No usable phased SNP",
     "phased_unassigned": "SNPs phased, read not assigned",
 }
 CLASS_ORDER = list(CLASS_LABEL)
@@ -152,7 +155,7 @@ CLASS_TICK = {
     "lowmapq": "MAPQ < 20",
     "no_snp_outside_bed": "Outside\nconfident\nregions",
     "no_snp": "No het SNP\non the read",
-    "snps_unphased": "SNPs not phased\nor single-SNP\nblock",
+    "snps_unphased": "No usable\nphased SNP",
     "phased_unassigned": "SNPs phased,\nread not\nassigned",
 }
 UNTAGGED = CLASS_ORDER[1:]
@@ -183,7 +186,7 @@ def grouped_bars(ax, groups, shares, width=0.2):
     y_grid(ax)
 
 
-def class_bars(db, ctx, ref, name, column, ylabel, phaser="whatshap"):
+def class_bars(db, ctx, ref, name, column, unit, ylabel, phaser="whatshap"):
     """Tagged on its own scale, the reasons a read is not tagged on another,
     a bar per platform; one phaser (the classes beside 'tagged' barely depend
     on it, the tables have all four)."""
@@ -203,18 +206,21 @@ def class_bars(db, ctx, ref, name, column, ylabel, phaser="whatshap"):
     grouped_bars(left, ["tagged"], shares)
     grouped_bars(right, UNTAGGED, shares)
     left.set_ylabel(ylabel + ", %d×" % depth)
-    right.set_title("Not tagged, by reason (%s)" % st.PHASER_LABEL[phaser])
+    left.set_title("%s tagged" % unit)
+    right.set_title("%s not tagged, by reason (%s)" % (unit, st.PHASER_LABEL[phaser]))
     top_legend(legend_ax, [Patch(facecolor=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p])
                            for p in st.PLATFORMS])
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
 
 
 def fig10a(db, ctx, ref):
-    return class_bars(db, ctx, ref, "fig10a_read_classes_reads", "reads", "Reads on chr1-22 (%)")
+    return class_bars(db, ctx, ref, "fig10a_read_classes_reads", "reads", "Reads",
+                      "Reads on chr1-22 (%)")
 
 
 def fig10b(db, ctx, ref):
-    return class_bars(db, ctx, ref, "fig10b_read_classes_bases", "bases", "Read bases on chr1-22 (%)")
+    return class_bars(db, ctx, ref, "fig10b_read_classes_bases", "bases", "Read bases",
+                      "Read bases on chr1-22 (%)")
 
 
 def fig10c(db, ctx, ref):
@@ -222,41 +228,41 @@ def fig10c(db, ctx, ref):
                           CONF_ORDER, CONF_LABEL, CONF_COLOR, "Tagged reads (%)", tagged_only=True)
 
 
+CONF_TICK = {
+    "high": "High\n(2+ SNPs,\nall agree)",
+    "medium": "Medium\n(majority,\nsome against)",
+    "single": "One SNP",
+    "tie": "Tie\n(as many\nfor each)",
+}
+
+
 def fig10d(db, ctx, ref):
-    """Accuracy of tagged reads in each confidence class, blocks oriented by
-    their SNPs; a class with fewer than 20 compared reads is not drawn."""
+    """Tagged reads on the wrong haplotype, by how the read's SNPs vote for
+    its haplotype, blocks oriented by their SNPs; platform x phaser down, one
+    confidence class per column. Fewer than 20 compared reads: hatched."""
     depth = ctx.depth
-    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 6)
-    drawn = []
-    for ax, platform in zip(axes, st.PLATFORMS):
-        here = 0
-        for j, phaser in enumerate(st.PHASERS):
-            table = db.classes((ref, "truth", platform, depth, phaser))
-            for i, conf in enumerate(CONF_ORDER[:4]):
-                row = table.get(("genome", "tagged_confidence", conf))
-                if not row or not row.get("compared") or row["compared"] < 20:
-                    continue
-                err = 100 * (1 - row["correct"] / row["compared"])
-                err = max(err, 0.01)
-                ax.plot(i + (j - 1.5) * 0.15, err, marker=st.PHASER_MARKER[phaser],
-                        color=st.PHASER_COLOR[phaser], markeredgecolor="white", linestyle="none", zorder=3)
-                drawn.append(err)
-                here += 1
-        ax.set_xticks(range(4))
-        ax.set_xticklabels([CONF_LABEL[c] for c in CONF_ORDER[:4]], rotation=35, ha="right",
-                           rotation_mode="anchor")
-        ax.set_xlim(-0.6, 3.6)
-        ax.set_title(st.PLATFORM_LABEL[platform])
-        y_grid(ax)
-        if not here:
-            empty_panel(ax)
-    if not drawn:
-        plt.close(fig)
+    confs = CONF_ORDER[:4]
+    rows = [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS]
+
+    def wrong(platform, phaser, conf):
+        row = db.classes((ref, "truth", platform, depth, phaser)).get(("genome", "tagged_confidence", conf))
+        if not row or not row.get("compared") or row["compared"] < 20:
+            return NAN
+        return 100 * (1 - row["correct"] / row["compared"])
+
+    matrix = [[wrong(pl, p, c) for c in confs] for pl, p in rows]
+    shown = [v for line in matrix for v in line if finite(v) and v > 0]
+    if not shown:
         raise NoData("no accuracy by confidence for %s at %dx" % (ref, depth))
-    axes[0].set_yscale("log")
-    log_ticks(axes[0].yaxis, min(drawn), max(drawn))
-    axes[0].set_ylabel("Tagged reads on the wrong\nhaplotype (%%), %d×" % depth)
-    top_legend(legend_ax, phaser_handles(line=False))
+    floor = min(shown) / 2
+    matrix = [[floor if finite(v) and v <= 0 else v for v in line] for line in matrix]
+    fig, ax = plt.subplots(figsize=((62 + 18 * len(confs)) * st.MM, 100 * st.MM),
+                           constrained_layout=True)
+    im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows], [CONF_TICK[c] for c in confs],
+                 [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
+                 [("", len(confs))], label=lambda v: "0" if v <= floor else short_number(v),
+                 cmap=st.SEQUENTIAL, norm=log_norm(shown + [floor]))
+    colorbar(fig, im, ax, "Tagged reads on the wrong haplotype (%%), %d×" % depth)
     return save(fig, ctx, "fig10d_accuracy_by_confidence_%dx_%s" % (depth, ref))
 
 
@@ -312,7 +318,7 @@ def fig10e(db, ctx, ref, phaser="whatshap"):
     return ", ".join(written)
 
 
-def enrichment_heatmap(ctx, ref, name, strata, value, label):
+def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None):
     depth = ctx.depth
     values = [value(pl, p, s) for pl in st.PLATFORMS for p in st.PHASERS for s in strata]
     values = [v for v in values if finite(v) and v > 0]
@@ -321,7 +327,7 @@ def enrichment_heatmap(ctx, ref, name, strata, value, label):
     # symmetric about 1, so depletion and enrichment get the same colour depth
     span = max(abs(math.log10(v)) for v in values) or 1
     return strata_heatmap(ctx, "%s_%dx_%s" % (name, depth, ref), strata, value,
-                          "%s, %d×" % (label, depth), cmap=DIVERGING,
+                          "%s, %d×" % (label, depth), note=note, cmap=DIVERGING,
                           norm=LogNorm(vmin=10 ** -span, vmax=10 ** span))
 
 
@@ -336,12 +342,18 @@ def switch_enrichment(db, key, stratum):
     return ratio(row["switches"], row["assessed"]) / genome
 
 
+def zero_note(row):
+    """'0' for a stratum row without a switch, else None"""
+    return "0" if row and row["assessed"] and not row["switches"] else None
+
+
 def fig11a(db, ctx, ref):
     depth = ctx.depth
     return enrichment_heatmap(
         ctx, ref, "fig11a_switch_enrichment", db.strata_names(),
         lambda pl, p, s: switch_enrichment(db, (ref, "truth", pl, depth, p), s),
-        "Switch error rate in the stratum,\nrelative to the genome")
+        "Switch error rate in the stratum,\nrelative to the genome",
+        note=lambda pl, p, s: zero_note(db.stratum((ref, "truth", pl, depth, p), s)))
 
 
 def fig11b(db, ctx, ref):
@@ -360,7 +372,6 @@ def fig11b(db, ctx, ref):
 STRATUM_FEATURES = [
     ("vaf_dev", "|VAF - 0.5|", lambda v: v),
     ("paralog_link_frac", "Links > 2 patterns (%)", lambda v: 100 * v),
-    ("depth_ratio", "Depth / genome", lambda v: v),
     ("lowmapq_frac", "Depth at MAPQ < 20 (%)", lambda v: 100 * v),
     ("mismatch_rate", "Read mismatches (%)", lambda v: 100 * v),
     ("indel_rate", "Read indels (%)", lambda v: 100 * v),
@@ -382,7 +393,7 @@ def fig11c(db, ctx, ref, phaser="whatshap"):
         values = {}
         for s in strata:
             v = {k: mech.get((platform, depth, "-", "-", s, k), NAN)
-                 for k in ("vaf_dev", "paralog_link_frac", "depth_ratio", "lowmapq_frac")}
+                 for k in ("vaf_dev", "paralog_link_frac", "lowmapq_frac")}
             allr = table.get((s, "all", "all"), {})
             tagged = table.get((s, "class", "tagged"), {})
             v["mismatch_rate"] = allr.get("mismatch_rate", NAN)
@@ -544,6 +555,134 @@ def sample_figures(dbs, ctx):
 
 
 # (id, function, drawn once per reference?)
+# ------------------------------------- T2T against GRCh38 in the strata: 12
+#
+# Each metric(db, ref, platform, phaser, stratum, depth) -> (value, errors): the
+# rate in the stratum ("genome" for the whole of chr1-22) and the number of
+# errors behind it (None where the rate is not a count of errors); truth input.
+# Under MIN_ERRORS errors on either reference the two rates are not compared.
+
+MIN_ERRORS = 10
+
+
+def stratum_switch(db, ref, platform, phaser, stratum, depth):
+    """switch errors / assessed pairs among the SNPs of the stratum (regions.sh)"""
+    key = (ref, "truth", platform, depth, phaser)
+    if stratum == "genome":
+        if not db.has(key):
+            return NAN, NAN
+        n, k = db.get(key, "assessed"), db.get(key, "switches")
+    else:
+        row = db.stratum(key, stratum)
+        if not row:
+            return NAN, NAN
+        n, k = row["assessed"], row["switches"]
+    if not (finite(n) and n > 0 and finite(k)):
+        return NAN, NAN
+    return 100 * k / n, k
+
+
+def stratum_block_ends(db, ref, platform, phaser, stratum, depth):
+    """phase block ends per 1,000 truth het SNPs of the stratum, a block end
+    placed at the middle of the gap between two blocks (strata_mechanism.py);
+    NG50 has no per-stratum form, this is what takes its place"""
+    mech = db.mechanism(ref)
+    snps_of = lambda s: mech.get((platform, depth, "-", "-", s, "truth_snps"), NAN)
+    snps = (snps_of("notinalldifficultregions") + snps_of("alldifficultregions")
+            if stratum == "genome" else snps_of(stratum))
+    k = mech.get((platform, depth, "truth", phaser, stratum, "breaks"), NAN)
+    if not (finite(snps) and snps > 0 and finite(k)):
+        return NAN, NAN
+    return 1000 * k / snps, k
+
+
+def stratum_tagged(db, ref, platform, phaser, stratum, depth):
+    """reads tagged in a block of 2+ SNPs, of the reads with half their
+    alignment or more in the stratum (read_classes.py)"""
+    table = db.classes((ref, "truth", platform, depth, phaser))
+    every = table.get((stratum, "all", "all"))
+    if not every or not every.get("reads"):
+        return NAN, NAN
+    tagged = table.get((stratum, "class", "tagged")) or {}
+    return 100 * (tagged.get("reads") or 0) / every["reads"], None
+
+
+def stratum_wrong(db, ref, platform, phaser, stratum, depth):
+    """tagged reads on the wrong haplotype, of those with a truth label"""
+    tagged = db.classes((ref, "truth", platform, depth, phaser)).get((stratum, "class", "tagged"))
+    if not tagged or not tagged.get("compared"):
+        return NAN, NAN
+    n = tagged["compared"]
+    return 100 * (n - tagged["correct"]) / n, n - tagged["correct"]
+
+
+def comparable(g, g_errors, t, t_errors):
+    """two rates are put side by side only on MIN_ERRORS errors or more on each
+    reference (and a rate that is not an error count only when both are > 0)"""
+    if g_errors is None or t_errors is None:
+        return g > 0 and t > 0
+    return g_errors >= MIN_ERRORS and t_errors >= MIN_ERRORS
+
+
+def reference_strata(db, ctx, name, metric, label, higher_is_better=False):
+    """T2T over GRCh38 for one rate: platform x phaser down, the whole genome
+    and each stratum across. A stratum of one name is cut to each reference's
+    own benchmark regions, so the two columns are the same kind of sequence,
+    not the same bases. Blue: better on T2T. Fewer than MIN_ERRORS errors on
+    either reference: dotted and '-', not comparable (both rates in t12g)."""
+    depth = ctx.depth
+    strata = ["genome"] + db.strata_names()
+
+    def pair(pl, p, s):
+        return (metric(db, "GRCh38", pl, p, s, depth), metric(db, "T2T", pl, p, s, depth))
+
+    def value(pl, p, s):
+        (g, _), (t, _) = pair(pl, p, s)
+        return t / g if finite(g) and finite(t) and g > 0 and t > 0 else NAN
+
+    def note(pl, p, s):
+        (g, g_errors), (t, t_errors) = pair(pl, p, s)
+        if not (finite(g) and finite(t)):
+            return None
+        return "–" if not comparable(g, g_errors, t, t_errors) else None
+
+    values = [value(pl, p, s) for pl in st.PLATFORMS for p in st.PHASERS for s in strata]
+    values = [v for v in values if finite(v) and v > 0]
+    if not values:
+        raise NoData("no %s on both references at %dx" % (name, depth))
+    # symmetric about 1 and never narrower than 0.5-2, so a small difference
+    # stays pale instead of filling the scale
+    span = max(max(abs(math.log10(v)) for v in values), math.log10(2))
+    out = strata_heatmap(ctx, "%s_%dx" % (name, depth), strata, value,
+                         "%s,\nT2T-CHM13 / GRCh38, %d×" % (label, depth), note=note,
+                         fmt=lambda v: "%.2f" % v,
+                         cmap=DIVERGING.reversed() if higher_is_better else DIVERGING,
+                         norm=LogNorm(vmin=10 ** -span, vmax=10 ** span))
+    if out is None:
+        raise NoData("no %s on both references at %dx" % (name, depth))
+    return out
+
+
+def fig12a(db, ctx):
+    return reference_strata(db, ctx, "fig12a_reference_strata_switch_rate", stratum_switch,
+                            "Switch error rate")
+
+
+def fig12b(db, ctx):
+    return reference_strata(db, ctx, "fig12b_reference_strata_block_ends", stratum_block_ends,
+                            "Phase block ends per het SNP")
+
+
+def fig12c(db, ctx):
+    return reference_strata(db, ctx, "fig12c_reference_strata_reads_tagged", stratum_tagged,
+                            "Reads tagged", higher_is_better=True)
+
+
+def fig12d(db, ctx):
+    return reference_strata(db, ctx, "fig12d_reference_strata_wrong_haplotype", stratum_wrong,
+                            "Tagged reads on the wrong haplotype")
+
+
 FIGURES_EXTRA = [
     ("fig7d", fig7d, True),
     ("fig7e", fig7e, True),
@@ -555,4 +694,8 @@ FIGURES_EXTRA = [
     ("fig11a", fig11a, True),
     ("fig11b", fig11b, True),
     ("fig11c", fig11c, True),
+    ("fig12a", fig12a, False),
+    ("fig12b", fig12b, False),
+    ("fig12c", fig12c, False),
+    ("fig12d", fig12d, False),
 ]

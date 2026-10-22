@@ -14,9 +14,7 @@ between groups, sections S1-S6 with a short line of text and a table of contents
   S6 Software
 
 The full per-run grid (t04_grid) is far too wide for a page and is referred to as
-Supplementary Data 1 (tables.xlsx). A table whose TSV is missing is left out. The
-Wilcoxon p-values of the reference comparison are recomputed here from t04_grid
-when scipy is available (make_tables.py leaves them empty without it).
+Supplementary Data 1 (tables.xlsx). A table whose TSV is missing is left out.
 """
 
 import argparse
@@ -24,11 +22,6 @@ import csv
 import math
 import os
 import re
-
-try:
-    from scipy.stats import wilcoxon
-except ImportError:
-    wilcoxon = None
 
 PLATFORMS = ["ONT 4 kHz", "ONT 5 kHz", "PacBio Sequel II", "PacBio Revio"]
 REFS = ["GRCh38", "T2T-CHM13"]
@@ -61,7 +54,7 @@ def num(v):
 
 def f(v, kind):
     """pct: 2 decimals; pct1: 1 decimal; sig3: 3 significant figures, trailing zeros
-    kept; ratio: 2 decimals; int: thousands separated by commas; p: p-value."""
+    kept; ratio: 2 decimals; int: thousands separated by commas."""
     x = num(v)
     if x is None:
         return "--"
@@ -75,11 +68,6 @@ def f(v, kind):
         return "%.2f" % x
     if kind == "int":
         return "{:,}".format(int(round(x)))
-    if kind == "p":
-        if x < 0.001:
-            m, e = ("%.1e" % x).split("e")
-            return "$%s\\times10^{%d}$" % (m, int(e))
-        return "%.3f" % x
     raise ValueError(kind)
 
 
@@ -420,48 +408,22 @@ def t_reads(d):
                  long=True, sep="4pt")
 
 
-def wilcoxon_p(grid, col, platforms, phasers):
-    if wilcoxon is None or grid is None:
-        return None
-    v = {}
-    for r in grid:
-        if r["input"] == "GIAB truth" and r["platform"] in platforms and r["phaser"] in phasers:
-            x = num(r[col])
-            if x is not None and x > 0:
-                v[(r["reference"], r["platform"], r["depth"], r["phaser"])] = x
-    d = [math.log(v[("T2T-CHM13",) + k[1:]] / v[k]) for k in v
-         if k[0] == "GRCh38" and ("T2T-CHM13",) + k[1:] in v]
-    if len(d) < 6:
-        return None
-    return 1.0 if all(x == 0 for x in d) else float(wilcoxon(d).pvalue)
-
-
-def t_reference_pooled(d, grid):
-    phasers = [p for p in PHASER_ORDER if grid and any(r["phaser"] == p for r in grid)]
-    groups = {p: ([p], PLATFORMS) for p in phasers}
-    groups.update({"ONT, all phasers": (phasers, PLATFORMS[:2]),
-                   "PacBio, all phasers": (phasers, PLATFORMS[2:]),
-                   "All runs": (phasers, PLATFORMS)})
+def t_reference_pooled(d):
     rows = []
     for r in d:
-        ph, pl = groups.get(r["group"], (None, None))
-        p = num(r["wilcoxon_p"])
-        if p is None and ph is not None:
-            p = wilcoxon_p(grid, r["metric"], pl, ph)
         rows.append([tex(r["group"]), METRIC_LABEL.get(r["metric"], tex(r["metric"])), r["pairs"],
                      f(r["median_ratio"], "ratio"),
                      "%s--%s" % (f(r["q1_ratio"], "ratio"), f(r["q3_ratio"], "ratio")),
-                     r["t2t_better"], f(p, "p") if p is not None else "--"])
+                     r["t2t_better"]])
     cap = ("GRCh38 against T2T-CHM13, pooled. Ratio T2T-CHM13 / GRCh38 of the same run (same "
            "platform, coverage and phaser; GIAB truth input, chr1--22), pooled per phaser over the "
            "four platforms and five coverages, and over phasers per technology. T2T better: pairs "
            "with a lower switch error rate, a longer NG50 or a higher share phased on T2T-CHM13. "
-           "$p$: two-sided Wilcoxon signed-rank test of log ratio = 0; descriptive, since the runs "
-           "of one platform share their reads across coverages. Reads were aligned differently to "
+           "Reads were aligned differently to "
            "the two references (provider alignments on GRCh38, minimap2 2.31 on T2T-CHM13), so the "
            "ratio contains both the reference and the alignment.")
-    header = ["Group & Metric & Pairs & Median ratio & IQR & T2T better & $p$ \\\\"]
-    return table("tab:reference", cap, "llrrcrr", header, layout(rows, 1))
+    header = ["Group & Metric & Pairs & Median ratio & IQR & T2T better \\\\"]
+    return table("tab:reference", cap, "llrrcr", header, layout(rows, 1))
 
 
 def t_reference_platform(d):
@@ -612,7 +574,7 @@ def main():
              "per phaser and technology, %s gives it per platform.\n"
              % (ref("tab:reference"), ref("tab:reference-platform")))
     if T("t06b_reference_pooled"):
-        S.append(t_reference_pooled(T("t06b_reference_pooled"), grid))
+        S.append(t_reference_pooled(T("t06b_reference_pooled")))
     if T("t06a_reference"):
         S.append(t_reference_platform(T("t06a_reference")))
 
@@ -621,7 +583,7 @@ def main():
     S.append("\\end{document}\n")
     with open(args.out, "w") as fh:
         fh.write("\n".join(S))
-    print("-> %s%s" % (args.out, "" if wilcoxon else " (no scipy: p-values left empty)"))
+    print("-> %s" % args.out)
 
 
 if __name__ == "__main__":

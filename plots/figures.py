@@ -637,18 +637,28 @@ def figS0(db, ctx, ref):
     return save(fig, ctx, "figS0_grid_completeness_" + ref)
 
 
-def strata_heatmap(ctx, name, strata, value, bar_label, **image):
+def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **image):
     """Platform x phaser down, one stratum per column: 16 rows of wide cells, so
-    every value fits its cell. value(platform, phaser, stratum) -> number; 0 is a
-    result (no error in the stratum), drawn in the lightest colour and written
-    as 0, and only NaN is hatched as not computed."""
+    every value fits its cell. value(platform, phaser, stratum) -> number; NaN is
+    hatched as not computed, 0 drawn in the lightest colour and written as 0.
+    note(platform, phaser, stratum) -> text or None: a cell with a note is
+    dotted, left uncoloured and carries the note instead of a value - for a
+    count of zero or of too few errors to compare, so that it does not read as
+    the best result of the figure. fmt(value) -> text overrides the
+    two significant figures written in a cell."""
     rows = [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS]
     matrix = [[value(pl, p, s) for s in strata] for pl, p in rows]
-    kept = [j for j in range(len(strata)) if any(finite(line[j]) for line in matrix)]
+    notes = [[note(pl, p, s) if note else None for s in strata] for pl, p in rows]
+    kept = [j for j in range(len(strata))
+            if any(finite(line[j]) or text[j] for line, text in zip(matrix, notes))]
     if not kept:
         return None
     strata = [strata[j] for j in kept]
     matrix = [[line[j] for j in kept] for line in matrix]
+    notes = [[line[j] for j in kept] for line in notes]
+    noted = [(i, j, text) for i, line in enumerate(notes) for j, text in enumerate(line) if text]
+    for i, j, _ in noted:
+        matrix[i][j] = NAN
     shown = [v for line in matrix for v in line if finite(v) and v > 0]
     floor = min(shown) / 2 if shown else 1.0
     matrix = [[floor if finite(v) and v <= 0 else v for v in line] for line in matrix]
@@ -659,8 +669,12 @@ def strata_heatmap(ctx, name, strata, value, bar_label, **image):
     im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows],
                  [stratum_label(s) for s in strata],
                  [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
-                 [("", len(strata))], label=lambda v: "0" if v <= floor else short_number(v),
-                 **image)
+                 [("", len(strata))],
+                 label=lambda v: "0" if v <= floor else (fmt or short_number)(v), **image)
+    for i, j, text in noted:
+        ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor="white", edgecolor=st.MISSING,
+                               hatch="....", linewidth=0, zorder=1.5))
+        ax.text(j, i, text, ha="center", va="center", color=st.MUTED, style="italic", zorder=3)
     plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
     colorbar(fig, im, ax, bar_label)
     return save(fig, ctx, name)
@@ -673,15 +687,21 @@ def fig8(db, ctx, ref, caller="truth"):
         row = db.stratum((ref, caller, platform, depth, phaser), stratum)
         return 100 * ratio(row["switches"], row["assessed"]) if row else NAN
 
+    def note(platform, phaser, stratum):
+        """no switch at all: written as 0 in an uncoloured cell"""
+        row = db.stratum((ref, caller, platform, depth, phaser), stratum)
+        return "0" if row and row["assessed"] and not row["switches"] else None
+
     out = strata_heatmap(ctx, "fig8_switch_rate_by_stratum_%dx_%s" % (depth, ref),
                          db.strata_names(), rate, "Switch error rate (%%), %d×" % depth,
-                         cmap=st.SEQUENTIAL)
+                         note=note, cmap=st.SEQUENTIAL)
     if out is None:
         raise NoData("no metrics_strata rows for %s at %d× - regions.sh has not run" % (ref, depth))
     return out
 
 
 STRATUM_LABEL = {
+    "genome": "Whole genome\n(chr1-22)",
     "notinalldifficultregions": "Easy regions",
     "alldifficultregions": "All difficult regions",
     "segdups": "Segmental duplications",
@@ -829,12 +849,13 @@ def figS3g(db, ctx, ref):
     return out
 
 
+# the scored part dark, the rest in hues of their own so neighbours never blur
 COMPOSITION = [
     ("Het SNP, benchmarked", "#2C3A4B"),
-    ("Het indel or multiallelic", "#6D7F92"),
-    ("Hom alt", "#B9C4CF"),
-    ("Hemizygous", "#DDE3E9"),
-    ("Other", "#F4F6F8"),
+    ("Het indel or multiallelic", "#C8775A"),
+    ("Hom alt", "#9DB7CC"),
+    ("Hemizygous", "#E3CF9A"),
+    ("Other", "#E6E6E6"),
 ]
 
 

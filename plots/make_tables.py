@@ -32,6 +32,7 @@ are still written.
   t12d_read_classes    why reads are not tagged, every platform and phaser
   t12e_strata_reads    reads per stratum: tagged, on the wrong haplotype, errors
   t12f_strata_features what makes a stratum hard (the values of fig11c)
+  t12g_strata_reference GRCh38 against T2T-CHM13 per stratum (the values of fig12)
   t13_samples          the other GIAB samples at 30x
   t14_software         tool versions
 """
@@ -53,12 +54,6 @@ from benchio import IntervalSet, is_autosome, open_text, vcf_records
 from data import NAN, Metrics, ratio, sample_root
 from figures import (n50_mb, read_precision_pct, read_recall_pct, recall_pct, switch_pct,
                      tagged_bases_pct, tagged_pct, truth_phased_pct)
-
-try:
-    from scipy.stats import wilcoxon
-except ImportError:            # the p-values are left empty without scipy
-    wilcoxon = None
-
 
 def finite(v):
     return isinstance(v, (int, float)) and math.isfinite(v)
@@ -551,19 +546,6 @@ def quartiles(values):
     return q[0], q[2]
 
 
-def paired_p(xs, ys):
-    """Two-sided Wilcoxon signed-rank p of log(T2T / GRCh38) = 0."""
-    if wilcoxon is None or len(xs) < 6:
-        return NAN
-    d = [math.log(y / x) for x, y in zip(xs, ys)]
-    if all(v == 0 for v in d):
-        return 1.0
-    try:
-        return float(wilcoxon(d).pvalue)
-    except ValueError:
-        return NAN
-
-
 def reference_pairs(db, value, platforms, phasers):
     a, b = st.REFERENCES
     pairs = []
@@ -589,10 +571,9 @@ def t06_reference(db, depth):
     pooled = Table("t06b_reference_pooled", "GRCh38 against T2T-CHM13, pooled",
                    "Ratio T2T / GRCh38 of the same run (truth input), pooled over platforms and "
                    "depths per phaser, and over phasers and depths per technology: median, "
-                   "interquartile range, runs where T2T is better, and the two-sided Wilcoxon "
-                   "signed-rank p of log ratio = 0 (empty without scipy or under 6 pairs).",
+                   "interquartile range and runs where T2T is better.",
                    ["group", "metric", "pairs", "median_ratio", "q1_ratio", "q3_ratio",
-                    "t2t_better", "wilcoxon_p"])
+                    "t2t_better"])
     for p in st.PLATFORMS:
         for ph in st.PHASERS:
             for metric, value, more in METRICS[:3]:
@@ -616,8 +597,7 @@ def t06_reference(db, depth):
             r = [y / x for x, y in pairs]
             q1, q3 = quartiles(r)
             better = sum(1 for x, y in pairs if (y > x if more else y < x))
-            pooled.add(label, metric, len(pairs), statistics.median(r), q1, q3, better,
-                       paired_p([x for x, _ in pairs], [y for _, y in pairs]))
+            pooled.add(label, metric, len(pairs), statistics.median(r), q1, q3, better)
     return t, pooled
 
 
@@ -778,7 +758,8 @@ def t12_strata(db, depth):
                           switch_enrichment(db, (ref, "truth", p, depth, ph), s),
                           mech.get((p, depth, "truth", ph, s, "break_enrichment"), NAN))
     return (a, b, t12c_strata_inputs(db, depth), t12d_read_classes(db, depth),
-            t12e_strata_reads(db, depth), t12f_strata_features(db, depth))
+            t12e_strata_reads(db, depth), t12f_strata_features(db, depth),
+            t12g_strata_reference(db, depth))
 
 
 def t12c_strata_inputs(db, depth):
@@ -861,9 +842,9 @@ def t12f_strata_features(db, depth):
     t = Table("t12f_strata_features", "What makes a stratum hard, %dx" % depth,
               "bin/strata_mechanism.sh, the values of fig11c: |VAF - 0.5| of the truth het SNPs "
               "in the reads; links between two SNPs showing more than two allele patterns (a "
-              "paralog sign); mean depth relative to the genome; share of the depth at MAPQ < 20.",
+              "paralog sign); share of the depth at MAPQ < 20.",
               ["reference", "stratum", "platform", "truth_het_snps", "vaf_dev",
-               "paralog_links_pct", "depth_ratio", "lowmapq_depth_pct"])
+               "paralog_links_pct", "lowmapq_depth_pct"])
     for ref in st.REFERENCES:
         mech = db.mechanism(ref)
         for s in db.strata_names():
@@ -872,7 +853,45 @@ def t12f_strata_features(db, depth):
                 if not finite(get("truth_snps")):
                     continue
                 t.add(ref_label(ref), stratum_name(s), plat(p), get("truth_snps"), get("vaf_dev"),
-                      100 * get("paralog_link_frac"), get("depth_ratio"), 100 * get("lowmapq_frac"))
+                      100 * get("paralog_link_frac"), 100 * get("lowmapq_frac"))
+    return t
+
+
+def t12g_strata_reference(db, depth):
+    from figures_extra import (MIN_ERRORS, comparable, stratum_block_ends, stratum_switch,
+                               stratum_tagged, stratum_wrong)
+    metrics = [("switch_rate_pct", stratum_switch, "switches"),
+               ("block_ends_per_1000_snps", stratum_block_ends, "block_ends"),
+               ("reads_tagged_pct", stratum_tagged, None),
+               ("wrong_haplotype_pct", stratum_wrong, "wrong_reads")]
+    columns = []
+    for m, _, count in metrics:
+        columns += [m + "_grch38", m + "_t2t", m + "_ratio"]
+        if count:
+            columns += [count + "_grch38", count + "_t2t"]
+    t = Table("t12g_strata_reference", "GRCh38 against T2T-CHM13 per stratum, truth input, %dx" % depth,
+              "The rates of fig12 on each reference, their ratio (T2T / GRCh38) and the error "
+              "counts behind them; 'Genome' is all of chr1-22. The ratio is left empty under %d "
+              "errors on either reference (not comparable). Switch rate: among the het SNPs of "
+              "the stratum (regions.sh). Block ends: per 1,000 truth het SNPs of the stratum, "
+              "placed at the middle of the gap between two blocks. Reads: those with half their "
+              "alignment or more in the stratum. A stratum of one name is cut to each "
+              "reference's own benchmark regions." % MIN_ERRORS,
+              ["stratum", "platform", "phaser"] + columns)
+    for s in ["genome"] + db.strata_names():
+        for p in st.PLATFORMS:
+            for ph in st.PHASERS:
+                cells = []
+                for _, f, count in metrics:
+                    g, g_errors = f(db, "GRCh38", p, ph, s, depth)
+                    v, t_errors = f(db, "T2T", p, ph, s, depth)
+                    ok = finite(g) and finite(v) and comparable(g, g_errors, v, t_errors)
+                    cells += [g, v, v / g if ok else NAN]
+                    if count:
+                        cells += [g_errors, t_errors]
+                if not any(finite(c) for c in cells):
+                    continue
+                t.add("Genome" if s == "genome" else stratum_name(s), plat(p), phaser_label(ph), *cells)
     return t
 
 
