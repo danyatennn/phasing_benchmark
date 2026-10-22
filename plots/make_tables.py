@@ -28,6 +28,10 @@ are still written.
   t11_reads_30x        read-level metrics at 30x, every input
   t12a_strata          what the strata are
   t12b_strata_switch   switch rate per stratum at 30x
+  t12c_strata_inputs   phasing per stratum at 30x, every input
+  t12d_read_classes    why reads are not tagged, every platform and phaser
+  t12e_strata_reads    reads per stratum: tagged, on the wrong haplotype, errors
+  t12f_strata_features what makes a stratum hard (the values of fig11c)
   t13_samples          the other GIAB samples at 30x
   t14_software         tool versions
 """
@@ -739,15 +743,18 @@ def stratum_name(s):
 
 
 def t12_strata(db, depth):
+    from figures_extra import switch_enrichment
     a = Table("t12a_strata", "The strata",
               "GIAB genome stratifications v3.6, chr1-22, each cut to the benchmark BED "
               "(regions_statistics.sh). bp_raw: the whole stratum; bp: inside the BED.",
               ["reference", "stratum", "bp_raw_mb", "bp_in_bed_mb", "genome_pct",
                "benchmark_het_snps", "het_snps_per_mb", "median_distance_bp", "within_50bp_pct"])
     b = Table("t12b_strata_switch", "Switch rate per stratum, truth input, %dx" % depth,
-              "Switch errors / assessed pairs inside each stratum (regions.sh on chr1-22). "
-              "Enrichment: switch errors (block ends) per het SNP in the stratum relative to "
-              "the genome (bin/strata_mechanism.sh), where computed.",
+              "Switch errors / assessed pairs among the het SNPs of the stratum, the truth cut "
+              "to it (regions.sh on chr1-22). Switch enrichment: that rate over the run's rate "
+              "on chr1-22. Block-end enrichment: phase block ends per het SNP in the stratum "
+              "relative to the genome, a block end placed at the middle of the gap between "
+              "the two blocks (bin/strata_mechanism.sh).",
               ["reference", "stratum", "platform", "phaser", "benchmark_het_snps", "switches",
                "assessed_pairs", "switch_rate_pct", "switch_enrichment", "block_end_enrichment"])
     for ref in st.REFERENCES:
@@ -768,7 +775,7 @@ def t12_strata(db, depth):
                     b.add(ref_label(ref), stratum_name(s), plat(p), phaser_label(ph),
                           row["truth_total"], row["switches"], row["assessed"],
                           pct(row["switches"], row["assessed"]),
-                          mech.get((p, depth, "truth", ph, s, "switch_enrichment"), NAN),
+                          switch_enrichment(db, (ref, "truth", p, depth, ph), s),
                           mech.get((p, depth, "truth", ph, s, "break_enrichment"), NAN))
     return (a, b, t12c_strata_inputs(db, depth), t12d_read_classes(db, depth),
             t12e_strata_reads(db, depth), t12f_strata_features(db, depth))
@@ -800,11 +807,11 @@ def t12c_strata_inputs(db, depth):
 
 
 def t12d_read_classes(db, depth):
-    from figures_extra import CLASS_ORDER
+    from figures_extra import CLASS_ORDER, group_row
     t = Table("t12d_read_classes", "Why reads are not tagged, truth input, %dx" % depth,
               "bin/read_classes.sh: every primary alignment on chr1-22 in exactly one class, the "
-              "first rule that fits (tagged; MAPQ < 20 in segdups / low mappability; MAPQ < 20 "
-              "elsewhere; no het SNP and outside the confident regions; no het SNP; SNPs only in "
+              "first rule that fits (tagged; MAPQ < 20; no het SNP and outside the confident "
+              "regions; no het SNP; SNPs only in "
               "no block of >= 2 SNPs; SNPs in a block yet no haplotype). Percent of all reads and "
               "of all read bases of the run.",
               ["reference", "platform", "phaser", "reads"]
@@ -813,7 +820,7 @@ def t12d_read_classes(db, depth):
         for p in st.PLATFORMS:
             for ph in st.PHASERS:
                 table = db.classes((ref, "truth", p, depth, ph))
-                rows = [table.get(("genome", "class", c), {}) for c in CLASS_ORDER]
+                rows = [group_row(table, "genome", "class", c) or {} for c in CLASS_ORDER]
                 reads = sum(r.get("reads", 0) or 0 for r in rows)
                 bases = sum(r.get("bases", 0) or 0 for r in rows)
                 if not reads:

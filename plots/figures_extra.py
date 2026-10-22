@@ -28,15 +28,14 @@ from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
 
 import style as st
-from data import NAN
+from data import NAN, ratio
 from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_ticks, panel_row,
                      phaser_axis, phaser_handles, platform_handles, positive, save,
                      short_number, strata_heatmap, stratum_label, top_legend, y_grid)
 
 CLASS_LABEL = {
     "tagged": "Tagged",
-    "lowmapq_paralog": "MAPQ < 20, paralogous region",
-    "lowmapq_other": "MAPQ < 20, elsewhere",
+    "lowmapq": "MAPQ < 20",
     "no_snp_outside_bed": "Outside confident regions",
     "no_snp": "No het SNP on the read",
     "snps_unphased": "SNPs not phased (or single-SNP block)",
@@ -45,13 +44,38 @@ CLASS_LABEL = {
 CLASS_ORDER = list(CLASS_LABEL)
 CLASS_COLOR = {
     "tagged": "#2C3A4B",
-    "lowmapq_paralog": "#B5523B",
-    "lowmapq_other": "#E39B7B",
+    "lowmapq": "#E39B7B",
     "no_snp_outside_bed": "#D9D9D9",
     "no_snp": "#A9B8C6",
     "snps_unphased": "#6D7F92",
     "phased_unassigned": "#E3A034",
 }
+# read_classes.py splits MAPQ < 20 by segdups / low mappability cut to the
+# confident regions, where few low-MAPQ reads are; the figures show one class
+CLASS_PARTS = {"lowmapq": ("lowmapq_paralog", "lowmapq_other")}
+SUMMED = ("reads", "bases", "compared", "correct")
+# the weights of the per-read means and per-base rates when parts are merged;
+# vaf_dev and paralog_link_frac are averaged over reads, not over their SNPs
+WEIGHTED = {"mean_length": "reads", "mean_mapq": "reads", "mean_bq": "reads",
+            "vaf_dev": "reads", "paralog_link_frac": "reads", "softclip_frac": "bases",
+            "nm_rate": "bases", "mismatch_rate": "bases", "indel_rate": "bases"}
+
+
+def group_row(table, stratum, group_type, group):
+    """One row of a read_classes.py table; a merged class sums the counts of
+    its parts and averages their features, weighted as in WEIGHTED."""
+    parts = CLASS_PARTS.get(group) if group_type == "class" else None
+    if not parts:
+        return table.get((stratum, group_type, group))
+    rows = [table[(stratum, group_type, p)] for p in parts if (stratum, group_type, p) in table]
+    if not rows:
+        return None
+    out = {c: sum(r.get(c) or 0 for r in rows) for c in SUMMED}
+    for col, weight in WEIGHTED.items():
+        pairs = [(r[col], r.get(weight) or 0) for r in rows if finite(r.get(col))]
+        total = sum(w for _, w in pairs)
+        out[col] = sum(v * w for v, w in pairs) / total if total else NAN
+    return out
 CONF_LABEL = {"high": "High", "medium": "Medium", "single": "One SNP", "tie": "Tie", "none": "No SNP"}
 CONF_ORDER = list(CONF_LABEL)
 CONF_COLOR = {"high": "#2C3A4B", "medium": "#6D7F92", "single": "#B9C4CF", "tie": "#E3A034",
@@ -94,11 +118,11 @@ def class_shares(db, ref, depth, caller, column, group_type, order, tagged_only=
             if not table:
                 continue
             gtype = "tagged_confidence" if tagged_only else group_type
-            total = sum(table.get(("genome", gtype, g), {}).get(column, 0) or 0 for g in order)
+            counts = {g: (group_row(table, "genome", gtype, g) or {}).get(column, 0) or 0 for g in order}
+            total = sum(counts.values())
             if not total:
                 continue
-            out.setdefault(platform, {})[phaser] = {
-                g: 100 * (table.get(("genome", gtype, g), {}).get(column, 0) or 0) / total for g in order}
+            out.setdefault(platform, {})[phaser] = {g: 100 * counts[g] / total for g in order}
     return out
 
 
@@ -125,8 +149,7 @@ def stacked_figure(db, ctx, ref, name, column, group_type, order, labels, colors
 
 CLASS_TICK = {
     "tagged": "Tagged",
-    "lowmapq_paralog": "MAPQ < 20,\nparalogous\nregion",
-    "lowmapq_other": "MAPQ < 20,\nelsewhere",
+    "lowmapq": "MAPQ < 20",
     "no_snp_outside_bed": "Outside\nconfident\nregions",
     "no_snp": "No het SNP\non the read",
     "snps_unphased": "SNPs not phased\nor single-SNP\nblock",
@@ -275,10 +298,10 @@ def fig10e(db, ctx, ref, phaser="whatshap"):
     written = []
     for platform in st.PLATFORMS:
         table = db.classes((ref, "truth", platform, depth, phaser))
-        rows = [c for c in CLASS_ORDER if ("genome", "class", c) in table]
+        values = {c: group_row(table, "genome", "class", c) for c in CLASS_ORDER}
+        rows = [c for c in CLASS_ORDER if values[c]]
         if not rows:
             continue
-        values = {c: table[("genome", "class", c)] for c in rows}
         fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * 0.75 * st.MM, (30 + 7 * len(rows)) * st.MM),
                                constrained_layout=True)
         feature_heatmap(ax, fig, rows, [CLASS_LABEL[c] for c in rows], values,
@@ -289,21 +312,12 @@ def fig10e(db, ctx, ref, phaser="whatshap"):
     return ", ".join(written)
 
 
-def enrichment_heatmap(db, ctx, ref, name, metric, label):
+def enrichment_heatmap(ctx, ref, name, strata, value, label):
     depth = ctx.depth
-    mech = db.mechanism(ref)
-    if not mech:
-        raise NoData("no mechanism_%s.tsv - run bin/strata_mechanism.sh" % ref)
-    strata = [s for s in db.strata_names()
-              if any(k[4] == s and k[5] == metric for k in mech)]
-
-    def value(platform, phaser, stratum):
-        return mech.get((platform, depth, "truth", phaser, stratum, metric), NAN)
-
     values = [value(pl, p, s) for pl in st.PLATFORMS for p in st.PHASERS for s in strata]
     values = [v for v in values if finite(v) and v > 0]
     if not values:
-        raise NoData("no %s for %s at %dx" % (metric, ref, depth))
+        raise NoData("no %s for %s at %dx" % (name, ref, depth))
     # symmetric about 1, so depletion and enrichment get the same colour depth
     span = max(abs(math.log10(v)) for v in values) or 1
     return strata_heatmap(ctx, "%s_%dx_%s" % (name, depth, ref), strata, value,
@@ -311,14 +325,36 @@ def enrichment_heatmap(db, ctx, ref, name, metric, label):
                           norm=LogNorm(vmin=10 ** -span, vmax=10 ** span))
 
 
+def switch_enrichment(db, key, stratum):
+    """Switch rate among the SNPs of the stratum (regions.sh, the numbers of
+    fig8) over the run's switch rate on chr1-22: a flip counts in the stratum
+    of the flipped SNP, and a mis-phased stretch in the stratum it lies in."""
+    row = db.stratum(key, stratum)
+    genome = db.get(key, "switch_rate") if db.has(key) else NAN
+    if not row or not finite(genome) or genome <= 0:
+        return NAN
+    return ratio(row["switches"], row["assessed"]) / genome
+
+
 def fig11a(db, ctx, ref):
-    return enrichment_heatmap(db, ctx, ref, "fig11a_switch_enrichment", "switch_enrichment",
-                              "Switch errors per het SNP,\nrelative to the genome")
+    depth = ctx.depth
+    return enrichment_heatmap(
+        ctx, ref, "fig11a_switch_enrichment", db.strata_names(),
+        lambda pl, p, s: switch_enrichment(db, (ref, "truth", pl, depth, p), s),
+        "Switch error rate in the stratum,\nrelative to the genome")
 
 
 def fig11b(db, ctx, ref):
-    return enrichment_heatmap(db, ctx, ref, "fig11b_block_end_enrichment", "break_enrichment",
-                              "Phase block ends per het SNP,\nrelative to the genome")
+    depth = ctx.depth
+    mech = db.mechanism(ref)
+    if not mech:
+        raise NoData("no mechanism_%s.tsv - run bin/strata_mechanism.sh" % ref)
+    strata = [s for s in db.strata_names()
+              if any(k[4] == s and k[5] == "break_enrichment" for k in mech)]
+    return enrichment_heatmap(
+        ctx, ref, "fig11b_block_end_enrichment", strata,
+        lambda pl, p, s: mech.get((pl, depth, "truth", p, s, "break_enrichment"), NAN),
+        "Phase block ends per het SNP,\nrelative to the genome")
 
 
 STRATUM_FEATURES = [
