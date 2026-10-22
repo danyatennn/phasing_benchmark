@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter
 
 import style as st
 from data import NAN
@@ -122,14 +123,75 @@ def stacked_figure(db, ctx, ref, name, column, group_type, order, labels, colors
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
 
 
+CLASS_TICK = {
+    "tagged": "Tagged",
+    "lowmapq_paralog": "MAPQ < 20,\nparalogous\nregion",
+    "lowmapq_other": "MAPQ < 20,\nelsewhere",
+    "no_snp_outside_bed": "Outside\nconfident\nregions",
+    "no_snp": "No het SNP\non the read",
+    "snps_unphased": "SNPs not phased\nor single-SNP\nblock",
+    "phased_unassigned": "SNPs phased,\nread not\nassigned",
+}
+UNTAGGED = CLASS_ORDER[1:]
+
+
+def pct_text(v):
+    return "%.1f" % v if v >= 1 else "%.2f" % v
+
+
+def grouped_bars(ax, groups, shares, width=0.2):
+    """A group per read class, a bar per platform, each value written above
+    its bar so a 0.1% class is read as easily as a 70% one."""
+    pad = 0.015 * ax.get_ylim()[1]
+    for i, g in enumerate(groups):
+        for j, platform in enumerate(st.PLATFORMS):
+            v = shares.get(platform, {}).get(g)
+            if v is None:
+                continue
+            x = i + (j - 1.5) * width
+            ax.bar(x, v, width=width * 0.9, color=st.PLATFORM_COLOR[platform], zorder=3)
+            ax.text(x, v + pad, pct_text(v), rotation=90, ha="center", va="bottom",
+                    fontsize=st.FONT_SIZE - 1, color=st.INK, zorder=4)
+    ax.set_xticks(range(len(groups)))
+    ax.set_xticklabels([CLASS_TICK[g] for g in groups])
+    ax.set_xlim(-0.55, len(groups) - 0.45)
+    ax.tick_params(axis="x", length=0)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    y_grid(ax)
+
+
+def class_bars(db, ctx, ref, name, column, ylabel, phaser="whatshap"):
+    """Tagged on its own scale, the reasons a read is not tagged on another,
+    a bar per platform; one phaser (the classes beside 'tagged' barely depend
+    on it, the tables have all four)."""
+    depth = ctx.depth
+    shares = class_shares(db, ref, depth, "truth", column, "class", CLASS_ORDER)
+    shares = {p: v[phaser] for p, v in shares.items() if phaser in v}
+    if not shares:
+        raise NoData("no metrics_reads classes for %s at %dx - run bin/read_classes.sh" % (ref, depth))
+    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, 72 * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 2, height_ratios=[0.08, 1], width_ratios=[1.4, len(UNTAGGED)])
+    legend_ax = fig.add_subplot(grid[0, :])
+    legend_ax.axis("off")
+    left, right = fig.add_subplot(grid[1, 0]), fig.add_subplot(grid[1, 1])
+    rest = [v for p in shares.values() for g, v in p.items() if g != "tagged"]
+    left.set_ylim(0, 100)
+    right.set_ylim(0, max(rest) * 1.3 if rest else 1)
+    grouped_bars(left, ["tagged"], shares)
+    grouped_bars(right, UNTAGGED, shares)
+    left.set_ylabel(ylabel + ", %d×" % depth)
+    right.set_title("Not tagged, by reason (%s)" % st.PHASER_LABEL[phaser])
+    top_legend(legend_ax, [Patch(facecolor=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p])
+                           for p in st.PLATFORMS])
+    return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
+
+
 def fig10a(db, ctx, ref):
-    return stacked_figure(db, ctx, ref, "fig10a_read_classes_reads", "reads", "class",
-                          CLASS_ORDER, CLASS_LABEL, CLASS_COLOR, "Reads on chr1-22 (%)")
+    return class_bars(db, ctx, ref, "fig10a_read_classes_reads", "reads", "Reads on chr1-22 (%)")
 
 
 def fig10b(db, ctx, ref):
-    return stacked_figure(db, ctx, ref, "fig10b_read_classes_bases", "bases", "class",
-                          CLASS_ORDER, CLASS_LABEL, CLASS_COLOR, "Read bases on chr1-22 (%)")
+    return class_bars(db, ctx, ref, "fig10b_read_classes_bases", "bases", "Read bases on chr1-22 (%)")
 
 
 def fig10c(db, ctx, ref):

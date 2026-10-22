@@ -873,43 +873,28 @@ def figS3c(db, ctx, ref):
     return save(fig, ctx, "figS3c_strata_composition_" + ref)
 
 
-def strata_dots(db, ctx, ref, name, column, scale, xlabel, fmt, log):
-    names, stats = strata_rows(db, ref)
-    values = [scale * stats[s][column] for s in names]
-    values = [positive(v) if log else v for v in values]
-    if not any(finite(v) for v in values):
-        raise NoData("no %s for %s" % (column, ref))
-    fig, ax = strata_axes(len(names))
-    for i, v in enumerate(values):
-        if not finite(v):
-            continue
-        ax.plot(v, i, marker="o", color=STRATA_DARK, markeredgecolor="white", zorder=3)
-        ax.annotate(fmt(v), xy=(v, i), xytext=(5, 0), textcoords="offset points",
-                    va="center", color=st.INK)
-    shown = [v for v in values if finite(v)]
-    if log:
-        ax.set_xscale("log")
-        lo, hi = min(shown) / 2, max(shown) * 4
-        ax.set_xlim(lo, hi)
-        log_ticks(ax.xaxis, lo, hi)
-    else:
-        ax.set_xlim(0, max(shown) * 1.35)
-    ax.set_xlabel(xlabel)
-    strata_y(ax, names)
-    return save(fig, ctx, name + "_" + ref)
-
-
 def figS3d(db, ctx, ref):
     """Phase blocks break where het SNPs are sparse: the typical gap."""
-    return strata_dots(db, ctx, ref, "figS3d_strata_snp_spacing", "median_inter_snp_dist", 1,
-                       "Median distance to the next\ntruth het SNP (bp)", thousands, log=True)
+    names, stats = strata_rows(db, ref)
+    out = strata_bars(ctx, ref, "figS3d_strata_snp_spacing", names,
+                      [positive(stats[s]["median_inter_snp_dist"]) for s in names],
+                      "Median distance to the next\ntruth het SNP (bp)",
+                      lambda i, v: thousands(v), log=True)
+    if out is None:
+        raise NoData("no SNP spacing for %s" % ref)
+    return out
 
 
 def figS3e(db, ctx, ref):
     """SNPs this close share most reads, and a read error there touches both."""
-    return strata_dots(db, ctx, ref, "figS3e_strata_close_snps", "frac_snp_within_50bp", 100,
-                       "Truth het SNPs less than 50 bp\nfrom the next one (%)",
-                       lambda v: short_number(v), log=False)
+    names, stats = strata_rows(db, ref)
+    out = strata_bars(ctx, ref, "figS3e_strata_close_snps", names,
+                      [100 * stats[s]["frac_snp_within_50bp"] for s in names],
+                      "Truth het SNPs less than 50 bp\nfrom the next one (%)",
+                      lambda i, v: short_number(v) + "%")
+    if out is None:
+        raise NoData("no close SNPs for %s" % ref)
+    return out
 
 
 def figS3f(db, ctx, ref):

@@ -746,10 +746,10 @@ def t12_strata(db, depth):
                "benchmark_het_snps", "het_snps_per_mb", "median_distance_bp", "within_50bp_pct"])
     b = Table("t12b_strata_switch", "Switch rate per stratum, truth input, %dx" % depth,
               "Switch errors / assessed pairs inside each stratum (regions.sh on chr1-22). "
-              "Enrichment: switch errors per het SNP in the stratum relative to the genome "
-              "(bin/strata_mechanism.sh), where computed.",
-              ["reference", "stratum", "platform", "phaser", "switches", "assessed_pairs",
-               "switch_rate_pct", "switch_enrichment"])
+              "Enrichment: switch errors (block ends) per het SNP in the stratum relative to "
+              "the genome (bin/strata_mechanism.sh), where computed.",
+              ["reference", "stratum", "platform", "phaser", "benchmark_het_snps", "switches",
+               "assessed_pairs", "switch_rate_pct", "switch_enrichment", "block_end_enrichment"])
     for ref in st.REFERENCES:
         stats = db.strata_statistics(ref)
         names = [s for s in db.strata_names() if s in stats]
@@ -765,10 +765,108 @@ def t12_strata(db, depth):
                     row = db.stratum((ref, "truth", p, depth, ph), s)
                     if not row:
                         continue
-                    b.add(ref_label(ref), stratum_name(s), plat(p), phaser_label(ph), row["switches"],
-                          row["assessed"], pct(row["switches"], row["assessed"]),
-                          mech.get((p, depth, "truth", ph, s, "switch_enrichment"), NAN))
-    return a, b
+                    b.add(ref_label(ref), stratum_name(s), plat(p), phaser_label(ph),
+                          row["truth_total"], row["switches"], row["assessed"],
+                          pct(row["switches"], row["assessed"]),
+                          mech.get((p, depth, "truth", ph, s, "switch_enrichment"), NAN),
+                          mech.get((p, depth, "truth", ph, s, "break_enrichment"), NAN))
+    return (a, b, t12c_strata_inputs(db, depth), t12d_read_classes(db, depth),
+            t12e_strata_reads(db, depth), t12f_strata_features(db, depth))
+
+
+def t12c_strata_inputs(db, depth):
+    t = Table("t12c_strata_inputs", "Phasing per stratum, every input, %dx" % depth,
+              "regions.sh: the run's VCF and the truth cut to the stratum (chr1-22). Phased: "
+              "phased / all het SNPs of the input in the stratum; switch and Hamming rates over "
+              "assessed pairs and covered SNPs; correct: truth het SNPs called and phased right, "
+              "of all truth het SNPs in the stratum; FNR / FDR of the input's het SNPs there.",
+              ["reference", "stratum", "platform", "input", "phaser", "benchmark_het_snps",
+               "phased_pct", "switch_rate_pct", "hamming_rate_pct", "correct_pct", "fnr_pct",
+               "fdr_pct"])
+    for ref in st.REFERENCES:
+        for s in db.strata_names():
+            for p in st.PLATFORMS:
+                for c in st.CALLERS:
+                    for ph in st.PHASERS:
+                        row = db.stratum((ref, c, p, depth, ph), s)
+                        if not row:
+                            continue
+                        t.add(ref_label(ref), stratum_name(s), plat(p), caller_label(c),
+                              phaser_label(ph), row["truth_total"], pct(row["phased"], row["variants"]),
+                              pct(row["switches"], row["assessed"]), pct(row["hamming"], row["covered"]),
+                              pct(row["correct"], row["truth_total"]), 100 * row["fnr"],
+                              100 * row["fdr"])
+    return t
+
+
+def t12d_read_classes(db, depth):
+    from figures_extra import CLASS_ORDER
+    t = Table("t12d_read_classes", "Why reads are not tagged, truth input, %dx" % depth,
+              "bin/read_classes.sh: every primary alignment on chr1-22 in exactly one class, the "
+              "first rule that fits (tagged; MAPQ < 20 in segdups / low mappability; MAPQ < 20 "
+              "elsewhere; no het SNP and outside the confident regions; no het SNP; SNPs only in "
+              "no block of >= 2 SNPs; SNPs in a block yet no haplotype). Percent of all reads and "
+              "of all read bases of the run.",
+              ["reference", "platform", "phaser", "reads"]
+              + ["reads_%s_pct" % c for c in CLASS_ORDER] + ["bases_%s_pct" % c for c in CLASS_ORDER])
+    for ref in st.REFERENCES:
+        for p in st.PLATFORMS:
+            for ph in st.PHASERS:
+                table = db.classes((ref, "truth", p, depth, ph))
+                rows = [table.get(("genome", "class", c), {}) for c in CLASS_ORDER]
+                reads = sum(r.get("reads", 0) or 0 for r in rows)
+                bases = sum(r.get("bases", 0) or 0 for r in rows)
+                if not reads:
+                    continue
+                t.add(ref_label(ref), plat(p), phaser_label(ph), reads,
+                      *[pct(r.get("reads", 0) or 0, reads) for r in rows],
+                      *[pct(r.get("bases", 0) or 0, bases) for r in rows])
+    return t
+
+
+def t12e_strata_reads(db, depth):
+    t = Table("t12e_strata_reads", "Reads per stratum, truth input, %dx" % depth,
+              "bin/read_classes.sh: reads with half their alignment or more in the stratum. "
+              "Tagged: of those reads; wrong haplotype: tagged reads with a truth label whose "
+              "haplotype disagrees with it, blocks oriented by their SNPs; mismatches and indels "
+              "per aligned base of all the reads in the stratum.",
+              ["reference", "stratum", "platform", "phaser", "reads", "reads_tagged_pct",
+               "wrong_haplotype_pct", "mismatch_pct", "indel_pct"])
+    for ref in st.REFERENCES:
+        for s in ["genome"] + db.strata_names():
+            for p in st.PLATFORMS:
+                for ph in st.PHASERS:
+                    table = db.classes((ref, "truth", p, depth, ph))
+                    allr = table.get((s, "all", "all"))
+                    if not allr or not allr.get("reads"):
+                        continue
+                    tagged = table.get((s, "class", "tagged"), {})
+                    wrong = NAN
+                    if tagged.get("compared"):
+                        wrong = 100 - pct(tagged["correct"], tagged["compared"])
+                    t.add(ref_label(ref), "Genome" if s == "genome" else stratum_name(s), plat(p),
+                          phaser_label(ph), allr["reads"], pct(tagged.get("reads", 0) or 0, allr["reads"]),
+                          wrong, 100 * allr.get("mismatch_rate", NAN), 100 * allr.get("indel_rate", NAN))
+    return t
+
+
+def t12f_strata_features(db, depth):
+    t = Table("t12f_strata_features", "What makes a stratum hard, %dx" % depth,
+              "bin/strata_mechanism.sh, the values of fig11c: |VAF - 0.5| of the truth het SNPs "
+              "in the reads; links between two SNPs showing more than two allele patterns (a "
+              "paralog sign); mean depth relative to the genome; share of the depth at MAPQ < 20.",
+              ["reference", "stratum", "platform", "truth_het_snps", "vaf_dev",
+               "paralog_links_pct", "depth_ratio", "lowmapq_depth_pct"])
+    for ref in st.REFERENCES:
+        mech = db.mechanism(ref)
+        for s in db.strata_names():
+            for p in st.PLATFORMS:
+                get = lambda m: mech.get((p, depth, "-", "-", s, m), NAN)
+                if not finite(get("truth_snps")):
+                    continue
+                t.add(ref_label(ref), stratum_name(s), plat(p), get("truth_snps"), get("vaf_dev"),
+                      100 * get("paralog_link_frac"), get("depth_ratio"), 100 * get("lowmapq_frac"))
+    return t
 
 
 def t13_samples(dbs, depth=30, ref="GRCh38"):
