@@ -27,6 +27,7 @@ for caller in "${CALLERS[@]}"; do
   for platform in "${PLATFORMS[@]}"; do
     for depth in "${DEPTHS[@]}"; do
       for phaser in "${PHASERS[@]}"; do
+        phaser_applies "${phaser}" "${platform}" || continue
         name="$(vcf_name "${platform}" "${depth}" "${caller}" "${phaser}")"
         row="${METRICS_DIR}/${name}.row.tsv"
         cmp="${METRICS_DIR}/${name}.compare.tsv"

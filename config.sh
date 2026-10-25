@@ -112,6 +112,16 @@ fi
 if [[ "${SAMPLE}" != HG002 ]]; then
   CONFIDENT_BED="$(sample_path "${SAMPLE}" "bed_${REFERENCE_NAME}")"
   TRUTH_SRC_VCF="$(sample_path "${SAMPLE}" "truth_${REFERENCE_NAME}")"
+  # the BED is read as plain text everywhere (awk, Clair3, longcallD); a
+  # gzipped one from samples.tsv is unpacked once into the sample's derived/
+  if [[ "${CONFIDENT_BED}" == *.gz && -s "${CONFIDENT_BED}" ]]; then
+    _plain_bed="${DERIVED_DIR}/$(basename "${CONFIDENT_BED%.gz}")"
+    if [[ ! -s "${_plain_bed}" ]]; then
+      mkdir -p "${DERIVED_DIR}"
+      gzip -dc "${CONFIDENT_BED}" >"${_plain_bed}.$$" && mv -f "${_plain_bed}.$$" "${_plain_bed}"
+    fi
+    CONFIDENT_BED="${_plain_bed}"
+  fi
 fi
 
 REGION_NAME="${REGION_NAME:-wgs}"
@@ -123,7 +133,8 @@ CLAIR3_MODEL_revio="${CLAIR3_MODEL_revio:-hifi_revio}"
 
 VARIANT_CALLERS=(clair3 deepvariant longcalld)
 CALLERS=(${PHASING_CALLERS:-truth "${VARIANT_CALLERS[@]}"})
-PHASERS=(${PHASING_PHASERS:-whatshap longphase margin hapcut2})
+# hiphase runs on the PacBio platforms only (phaser_applies in lib.sh)
+PHASERS=(${PHASING_PHASERS:-whatshap longphase margin hapcut2 hiphase})
 
 RUN_TAG="${REFERENCE_NAME}"
 RUN_TAG="${RUN_TAG}_$(IFS=-; printf '%s' "${PLATFORMS[*]}")"
@@ -162,6 +173,15 @@ MARGIN="${SOFTWARE_DIR}/margin/build/margin"
 MARGIN_PARAMS_DIR="${SOFTWARE_DIR}/margin/params/phase"
 HIFIASM="${SOFTWARE_DIR}/hifiasm/hifiasm"
 HAPCUT2_BIN="/autofs/bal36/dten/miniforge3/envs/hapcut2/bin"
+HIPHASE="${HIPHASE:-/autofs/bal36/dten/miniforge3/envs/hiphase/bin/hiphase}"
+
+# meth_run.sh: methylation-aware phasing on the cells whose reads carry 5mC
+# (MM/ML tags), truth input. MethPhaser from its GitHub main (0.0.3 on bioconda
+# writes a broken VCF); its env also has modkit.
+METH_ENV_BIN="${METH_ENV_BIN:-/autofs/bal36/dten/miniforge3/envs/methphaser/bin}"
+METHPHASER_DIR="${METHPHASER_DIR:-${SOFTWARE_DIR}/methphaser}"
+METH_DIR="${SAMPLE_ROOT}/meth"
+METH_THREADS="${METH_THREADS:-16}"
 
 WHATSHAP_DOWNSAMPLING="${WHATSHAP_DOWNSAMPLING:-15}"
 
@@ -203,6 +223,15 @@ CHROM_LENGTHS="${DATA_DIR}/chrom_lengths_${REFERENCE_NAME}.tsv"
 
 TRUTH_PHASED="${TRUTH_PHASED:-${DERIVED_DIR}/truth${_ref_sfx}.het_snps.phased.vcf.gz}"
 TRUTH_UNPHASED="${TRUTH_UNPHASED:-${DERIVED_DIR}/truth${_ref_sfx}.het_snps.unphased.vcf.gz}"
+# experiment A (bin/make_truth_variants.sh): the same truth het SNPs plus
+#   truthindel  biallelic het indels
+#   truthall    every other het variant too: 1/2 sites split into two records,
+#               MNPs and complex variants atomized
+# phased (to score the added variants) and unphased (the phasers' input)
+TRUTH_INDEL_PHASED="${DERIVED_DIR}/truth${_ref_sfx}.indel.phased.vcf.gz"
+TRUTH_INDEL_UNPHASED="${DERIVED_DIR}/truth${_ref_sfx}.indel.unphased.vcf.gz"
+TRUTH_ALL_PHASED="${DERIVED_DIR}/truth${_ref_sfx}.all.phased.vcf.gz"
+TRUTH_ALL_UNPHASED="${DERIVED_DIR}/truth${_ref_sfx}.all.unphased.vcf.gz"
 
 MINIMAP2="/autofs/bal36/dten/bin/minimap2-2.31_x64-linux/minimap2"
 

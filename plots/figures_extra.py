@@ -33,6 +33,7 @@ from matplotlib.ticker import FuncFormatter
 import style as st
 from data import NAN, ratio
 from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks, panel_row,
+                     platform_groups, platform_phaser_rows,
                      phaser_axis, phaser_handles, platform_handles, positive, save,
                      short_number, strata_heatmap, stratum_label, top_legend, y_grid)
 
@@ -242,7 +243,7 @@ def fig10d(db, ctx, ref):
     confidence class per column. Fewer than 20 compared reads: hatched."""
     depth = ctx.depth
     confs = CONF_ORDER[:4]
-    rows = [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS]
+    rows = platform_phaser_rows()
 
     def wrong(platform, phaser, conf):
         row = db.classes((ref, "truth", platform, depth, phaser)).get(("genome", "tagged_confidence", conf))
@@ -259,7 +260,7 @@ def fig10d(db, ctx, ref):
     fig, ax = plt.subplots(figsize=((62 + 18 * len(confs)) * st.MM, 100 * st.MM),
                            constrained_layout=True)
     im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows], [CONF_TICK[c] for c in confs],
-                 [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
+                 platform_groups(rows),
                  [("", len(confs))], label=lambda v: "0" if v <= floor else short_number(v),
                  cmap=st.SEQUENTIAL, norm=log_norm(shown + [floor]))
     colorbar(fig, im, ax, "Tagged reads on the wrong haplotype (%%), %d×" % depth)

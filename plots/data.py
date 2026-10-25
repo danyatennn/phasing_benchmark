@@ -25,6 +25,8 @@ HG002 lives at the project root; any other sample under samples/<sample>/.
 import math
 import os
 
+from style import applies as phaser_applies
+
 NAN = float("nan")
 
 ROW_COLUMNS = [
@@ -167,6 +169,8 @@ class Metrics:
                 for platform in platforms:
                     for depth in depths:
                         for phaser in phasers:
+                            if not phaser_applies(platform, phaser):
+                                continue        # e.g. HiPhase on ONT: not a missing run
                             key = (ref, caller, platform, depth, phaser)
                             self.status[key] = self._load_one(key)
         self._load_calls()

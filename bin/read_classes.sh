@@ -85,8 +85,8 @@ log "${SAMPLE} ${REFERENCE_NAME}: read classes for ${CALLERS[*]} x ${PLATFORMS[*
 
 summary="${METRICS_READS_DIR}/summary_classes.tsv"
 {
-  first="$(ls "${METRICS_READS_DIR}"/*.classes.tsv 2>/dev/null | head -1)"
-  [[ -n "${first}" ]] && head -1 "${first}"
+  files=("${METRICS_READS_DIR}"/*.classes.tsv)
+  [[ -e "${files[0]}" ]] && head -1 "${files[0]}"
   for f in "${METRICS_READS_DIR}"/*.classes.tsv; do
     [[ -e "${f}" ]] && tail -n +2 "${f}"
   done

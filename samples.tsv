@@ -22,11 +22,13 @@
 HG002	pat_reads	$HG003_REVIO_BAM
 HG002	mat_reads	$HG004_REVIO_BAM
 #
+# HG001: Revio and ONT 5 kHz only, GRCh38 only; the truth is the phased
+# Platinum Pedigree v1.2 (the v4.2.1 one has no phase). The BED is gzipped:
+# config.sh unpacks it into samples/HG001/derived/.
 HG001	bam_ont5k	$ONT_HG001_V14_5KHZ_NO_ALT_BAM
-HG001	bam_hifi	$PB_HG001_NO_ALT_BAM
-#HG001	bam_ont4k	$HG001_ONT_30x_GRCH38_BAM
-HG001	truth_GRCh38	$HG001_GRCH38_TRUTH_VCF
-HG001	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg38/HG001_GRCh38_1_22_v4.2.1_benchmark.bed
+HG001	bam_revio	/autofs/bal19/zxzheng/data/bam/pb/revio/hg001/GRCh38.m84036_241119_193656_s2.hifi_reads.bam
+HG001	truth_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg001_platinum_pedigree/truthset_v1.2/NA12878_hq_v1.2.1.latest-smallvar.vcf.gz
+HG001	bed_GRCh38	/autofs/bal33/zxzheng/data/vcf/hg001_platinum_pedigree/truthset_v1.2/NA12878_hq_v1.2.smallvar.bed.gz
 #
 HG003	bam_ont4k	$ONT_HG003_dorado_NO_ALT_BAM
 HG003	bam_ont5k	$ONT_HG003_V14_5KHZ_NO_ALT_BAM

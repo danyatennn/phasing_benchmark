@@ -35,6 +35,7 @@ eval_one() {
   local vcf="${PHASE_DIR}/${name}.vcf.gz"
   local row="${METRICS_DIR}/${name}.row.tsv"
 
+  phaser_applies "${phaser}" "${platform}" || return 0
   [[ -s "${row}" ]] && row_is_valid "${row}" && { log "skip ${name}"; return 0; }
 
   local lock="${row}.lock"
@@ -166,7 +167,7 @@ eval_one() {
 }
 
 export -f eval_one vcf_name sub_bam bam_key stats_col cmp_sum haplotag_accuracy \
-          newer_than row_is_valid log warn die
+          newer_than row_is_valid phaser_applies log warn die
 export TRUTH_TOTAL BCFTOOLS ROW_FIELDS
 export METRICS_DIR PHASE_DIR LOGS_DIR DATA_DIR REF SAMPLE REFERENCE_NAME \
        HAPLOTAG_REGION \

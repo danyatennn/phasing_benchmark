@@ -26,7 +26,7 @@ import re
 PLATFORMS = ["ONT 4 kHz", "ONT 5 kHz", "PacBio Sequel II", "PacBio Revio"]
 REFS = ["GRCh38", "T2T-CHM13"]
 INPUTS = ["GIAB truth", "Clair3", "DeepVariant", "longcallD"]
-PHASER_ORDER = ["WhatsHap", "LongPhase", "Margin", "HapCUT2"]
+PHASER_ORDER = ["WhatsHap", "LongPhase", "Margin", "HapCUT2", "HiPhase"]
 METRIC_LABEL = {"switch_rate_pct": "Switch error rate", "ng50_mb": "NG50",
                 "truth_phased_pct": "Phased", "read_recall_pct": "Read recall"}
 METRIC_KIND = {"switch_rate_pct": "sig3", "ng50_mb": "sig3", "truth_phased_pct": "pct"}

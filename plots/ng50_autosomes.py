@@ -14,6 +14,7 @@ check_results.py --only ng50 showed this matches whatshap to 0.0% on T2T.
 
   python plots/ng50_autosomes.py                 every run of the grid, 8 at once
   python plots/ng50_autosomes.py -j 16 --refs T2T
+  python plots/ng50_autosomes.py --phasers "lpmod mpwhatshap" --depths 30   meth_run.sh runs
 
 metrics/<name>.ng50.tsv, one line: reference caller platform depth phaser
   ng50 blocks genome_bp. A file newer than its VCF is kept.
@@ -31,7 +32,8 @@ REFERENCES = ["GRCh38", "T2T"]
 CALLERS = ["truth", "clair3", "deepvariant", "longcalld"]
 PLATFORMS = ["ont4k", "ont5k", "hifi", "revio"]
 DEPTHS = [10, 20, 30, 40, 50]
-PHASERS = ["whatshap", "longphase", "margin", "hapcut2"]
+PHASERS = ["whatshap", "longphase", "margin", "hapcut2", "hiphase"]
+PACBIO_ONLY = {"hiphase", "mphiphase"}
 AUTOSOMES = {"chr%d" % i for i in range(1, 23)}
 
 
@@ -112,8 +114,13 @@ def main():
     parser.add_argument("--sample", default=SAMPLE,
                         help="HG002 lives at the root, any other sample under samples/<sample>/")
     parser.add_argument("--refs", default=" ".join(REFERENCES))
+    parser.add_argument("--phasers", default=" ".join(PHASERS))
+    parser.add_argument("--callers", default=" ".join(CALLERS))
+    parser.add_argument("--depths", default=" ".join(str(d) for d in DEPTHS))
     parser.add_argument("-j", type=int, default=8)
     ctx = parser.parse_args()
+    phasers, callers = ctx.phasers.split(), ctx.callers.split()
+    depths = [int(d) for d in ctx.depths.split()]
     jobs = []
     for ref in ctx.refs.split():
         root = ctx.root if ctx.sample == "HG002" else os.path.join(ctx.root, "samples", ctx.sample)
@@ -123,7 +130,8 @@ def main():
         genome = genome_size(root, ref)
         print("%s: autosomes %.1f Mb" % (ref, genome / 1e6))
         jobs += [(root, ctx.sample, ref, c, pl, d, ph, genome)
-                 for c in CALLERS for pl in PLATFORMS for d in DEPTHS for ph in PHASERS]
+                 for c in callers for pl in PLATFORMS for d in depths for ph in phasers
+                 if ph not in PACBIO_ONLY or pl in ("hifi", "revio")]
     with Pool(ctx.j) as pool:
         for msg in pool.imap_unordered(one, jobs):
             if msg:

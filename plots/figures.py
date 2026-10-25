@@ -637,6 +637,17 @@ def figS0(db, ctx, ref):
     return save(fig, ctx, "figS0_grid_completeness_" + ref)
 
 
+def platform_phaser_rows():
+    """platform x phaser, without the pairs a phaser does not run on (HiPhase on ONT)"""
+    return [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS if st.applies(pl, p)]
+
+
+def platform_groups(rows):
+    """(label, number of rows) per platform, for the left-hand group labels"""
+    return [(st.PLATFORM_LABEL[pl], sum(1 for r in rows if r[0] == pl))
+            for pl in st.PLATFORMS if any(r[0] == pl for r in rows)]
+
+
 def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **image):
     """Platform x phaser down, one stratum per column: 16 rows of wide cells, so
     every value fits its cell. value(platform, phaser, stratum) -> number; NaN is
@@ -646,7 +657,7 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **i
     count of zero or of too few errors to compare, so that it does not read as
     the best result of the figure. fmt(value) -> text overrides the
     two significant figures written in a cell."""
-    rows = [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS]
+    rows = platform_phaser_rows()
     matrix = [[value(pl, p, s) for s in strata] for pl, p in rows]
     notes = [[note(pl, p, s) if note else None for s in strata] for pl, p in rows]
     kept = [j for j in range(len(strata))
@@ -667,8 +678,7 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **i
     fig, ax = plt.subplots(figsize=((62 + 13 * len(strata)) * st.MM, 100 * st.MM),
                            constrained_layout=True)
     im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows],
-                 [stratum_label(s) for s in strata],
-                 [(st.PLATFORM_LABEL[pl], len(st.PHASERS)) for pl in st.PLATFORMS],
+                 [stratum_label(s) for s in strata], platform_groups(rows),
                  [("", len(strata))],
                  label=lambda v: "0" if v <= floor else (fmt or short_number)(v), **image)
     for i, j, text in noted:

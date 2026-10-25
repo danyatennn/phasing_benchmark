@@ -18,7 +18,7 @@ set -euo pipefail
 cd /autofs/bal36/dten/phasing_benchmark
 
 OUT="${TABLES_DIR:-/autofs/bal36/dten/phasing_benchmark/tables}"
-TABLE_PHASERS="${TABLE_PHASERS:-whatshap longphase margin hapcut2}"
+TABLE_PHASERS="${TABLE_PHASERS:-whatshap longphase margin hapcut2 hiphase}"
 mkdir -p "${OUT}"
 
 # config.sh keeps CONFIDENT_BED and TRUTH_SRC_VCF if they are already set, so

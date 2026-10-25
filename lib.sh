@@ -245,6 +245,15 @@ vcf_name() {
   printf '%s\n' "${n}"
 }
 
+# phaser_applies <phaser> <platform> - is this phaser run on this platform at
+# all? HiPhase (and MethPhaser on top of it) is written for PacBio HiFi reads
+phaser_applies() {
+  case "$1" in
+    hiphase|mphiphase) [[ "$2" == hifi || "$2" == revio ]] ;;
+    *) return 0 ;;
+  esac
+}
+
 longphase_flag() {
   case "$1" in
     ont4k|ont5k) printf '%s\n' --ont ;;

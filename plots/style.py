@@ -31,7 +31,12 @@ REFERENCES = ["GRCh38", "T2T"]
 PLATFORMS = ["ont4k", "ont5k", "hifi", "revio"]
 DEPTHS = [10, 20, 30, 40, 50]
 CALLERS = ["truth", "clair3", "deepvariant", "longcalld"]
-PHASERS = ["whatshap", "longphase", "margin", "hapcut2"]
+PHASERS = ["whatshap", "longphase", "margin", "hapcut2", "hiphase"]
+# a phaser run on some platforms only; every other one runs on all of them
+PHASER_PLATFORMS = {"hiphase": ("hifi", "revio")}
+# methylation-aware runs of meth_run.sh (truth input, 30x), next to the phasers:
+# LongPhase with its modcall VCF, and MethPhaser on top of each phaser's VCF
+METH_PHASERS = ["lpmod"] + ["mp" + p for p in PHASERS]
 
 REFERENCE_LABEL = {"GRCh38": "GRCh38", "T2T": "T2T-CHM13"}
 PLATFORM_LABEL = {
@@ -45,12 +50,21 @@ CALLER_LABEL = {
     "clair3": "Clair3",
     "deepvariant": "DeepVariant",
     "longcalld": "longcallD",
+    "truthindel": "GIAB truth + indels",
+    "truthall": "GIAB truth + all het variants",
 }
 PHASER_LABEL = {
     "whatshap": "WhatsHap",
     "longphase": "LongPhase",
     "margin": "Margin",
     "hapcut2": "HapCUT2",
+    "hiphase": "HiPhase",
+    "lpmod": "LongPhase + 5mC",
+    "mpwhatshap": "WhatsHap + MethPhaser",
+    "mplongphase": "LongPhase + MethPhaser",
+    "mpmargin": "Margin + MethPhaser",
+    "mphapcut2": "HapCUT2 + MethPhaser",
+    "mphiphase": "HiPhase + MethPhaser",
 }
 
 PLATFORM_COLOR = {
@@ -66,8 +80,15 @@ PHASER_COLOR = {
     "longphase": "#1F4E79",
     "margin": "#E3A034",
     "hapcut2": "#6FA8DC",
+    "hiphase": "#8C5A3C",
 }
-PHASER_MARKER = {"whatshap": "o", "longphase": "s", "margin": "^", "hapcut2": "D"}
+PHASER_MARKER = {"whatshap": "o", "longphase": "s", "margin": "^", "hapcut2": "D", "hiphase": "v"}
+
+
+def applies(platform, phaser):
+    """Is this phaser run on this platform at all (HiPhase: PacBio only)?"""
+    base = phaser[2:] if phaser.startswith("mp") else phaser
+    return platform in PHASER_PLATFORMS.get(base, (platform,))
 
 CALLER_COLOR = {
     "truth": "#9A9A9A",

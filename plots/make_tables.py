@@ -26,6 +26,7 @@ are still written.
   t09_call_vs_phase    what calling and what phasing cost, on the truth denominator
   t10_error_types      switch against flip errors
   t11_reads_30x        read-level metrics at 30x, every input
+  t11b_read_truths     read accuracy against the three read truths (truthtags, matpat, yak)
   t12a_strata          what the strata are
   t12b_strata_switch   switch rate per stratum at 30x
   t12c_strata_inputs   phasing per stratum at 30x, every input
@@ -717,6 +718,32 @@ def t11_reads(db, depth):
     return t
 
 
+def t11b_read_truths(db, depth):
+    from data import ANCHOR_TRUTHS
+    t = Table("t11b_read_truths", "Read accuracy against three read truths, %dx" % depth,
+              "Precision and recall of the read tags, blocks oriented by an anchor read "
+              "(readacc_anchor.sh), against each truth of which haplotype a read comes from: "
+              "truthtags = whatshap haplotag on the phased truth VCF; matpat = the read aligned "
+              "to both parental copies of the HG002 Q100 assembly (bin/matpat_truth.sh); yak = "
+              "parental k-mers (bin/yak_truth.sh). Empty: that truth not computed for the run.",
+              ["reference", "platform", "input", "phaser"]
+              + ["%s_%s_pct" % (m, truth) for truth in ANCHOR_TRUTHS for m in ("precision", "recall")])
+    for ref in st.REFERENCES:
+        for p in st.PLATFORMS:
+            for c in st.CALLERS:
+                for ph in st.PHASERS:
+                    k = (ref, c, p, depth, ph)
+                    if not db.has(k):
+                        continue
+                    cells = []
+                    for truth in ANCHOR_TRUTHS:
+                        cells += [100 * db.get(k, "read_precision_anchor_%s" % truth),
+                                  100 * db.get(k, "read_recall_anchor_%s" % truth)]
+                    if any(finite(v) for v in cells[2:]):      # at least one parental truth
+                        t.add(ref_label(ref), plat(p), caller_label(c), phaser_label(ph), *cells)
+    return t
+
+
 def stratum_name(s):
     from figures import stratum_label
     return stratum_label(s).replace("\n", " ")
@@ -967,7 +994,8 @@ def main():
     tables += [t03_callers(db), t04_grid(db), t05_main(db, ctx.depth)]
     tables += list(t06_reference(db, ctx.depth))
     tables += [t07_ranking(db), t08_coverage(db), t09_call_vs_phase(db, ctx.depth),
-               t10_error_types(db, ctx.depth), t11_reads(db, ctx.depth)]
+               t10_error_types(db, ctx.depth), t11_reads(db, ctx.depth),
+               t11b_read_truths(db, ctx.depth)]
     tables += list(t12_strata(db, ctx.depth))
     tables += [t13_samples({s: d for s, d in dbs.items()}), t14_software(ctx.software)]
 
