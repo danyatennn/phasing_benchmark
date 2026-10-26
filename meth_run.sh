@@ -198,9 +198,15 @@ prep_reads() (
 # jobs of a chromosome are cut from its n GTF lines as meth_phaser_parallel
 # does: ceil(n / threads) blocks each, overlapping by one
 mp_complete() {
-  local work="$1" logf="$2" chrom want have ok=0
-  if grep -q '^Traceback' "${logf}"; then
-    warn "$(basename "${work}"): a methphasing job crashed, see ${logf}"
+  local work="$1" logf="$2" chrom want have ok=0 crashed
+  # a traceback from multiprocessing's exit clean-up is not a crash: its
+  # temporary directory cannot be removed on NFS while files in it are still
+  # open ("Directory not empty"), which Python reports and ignores
+  crashed="$(awk '/^Traceback/ { t = 1; next }
+      t { if ($0 !~ /multiprocessing\/util\.py.*_run_finalizers/) n++; t = 0 }
+      END { print n + 0 }' "${logf}")"
+  if [[ "${crashed}" -gt 0 ]]; then
+    warn "$(basename "${work}"): ${crashed} methphasing jobs crashed, see ${logf}"
     ok=1
   fi
   while read -r chrom want; do
