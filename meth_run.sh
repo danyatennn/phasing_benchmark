@@ -10,7 +10,8 @@
 #                settings:
 #                  reads: primary alignments on chr1-22, 5mC calls only
 #                         (modkit adjust-mods drops 5hmC, 6mA, ...), tagged with
-#                         the phaser's VCF (whatshap haplotag)
+#                         the phaser's VCF (whatshap haplotag, one chromosome
+#                         per job: it tags each chromosome on its own anyway)
 #                  blocks: whatshap stats --gtf of that VCF
 #                  meth_phaser_parallel, then meth_phaser_post_processing
 #                The VCF post-processing writes is the run's VCF; the haplotype
@@ -54,6 +55,17 @@ export PATH="${METHPHASER_DIR}:${METH_ENV_BIN}:${PATH}"
 MODKIT="${METH_ENV_BIN}/modkit"
 require_cmds meth_phaser_parallel meth_phaser_post_processing methphasing "${MODKIT}"
 mkdir -p "${PHASE_DIR}" "${METRICS_DIR}" "${METH_DIR}" "${LOGS_DIR}/meth" "${TMP_DIR}"
+
+# haplotag_part <vcf> <bam> <chrom> <out> - whatshap haplotag on one chromosome.
+# whatshap reads, tags and writes one chromosome at a time and carries nothing
+# over (no BX tags here, supplementary alignments are gone), so the parts put
+# together in the order of the BAM header are the whole-genome output
+haplotag_part() {
+  "${WHATSHAP}" haplotag --reference "${REF}" --sample "${SAMPLE}" --ignore-read-groups \
+      --regions "$3" -o "$4" "$1" "$2" >"$4.log" 2>&1
+}
+export -f haplotag_part
+export WHATSHAP REF SAMPLE
 
 # sample_reads <bam> - up to 1000 reads from each of SAMPLE_REGIONS
 sample_reads() {
@@ -222,17 +234,48 @@ mp_one() (
   local reads="${METH_DIR}/${cell}/reads.5mc.bam"
   local work="${METH_DIR}/${cell}/mp${phaser}"
   local logf="${LOGS_DIR}/meth/${name}.log"
-  rm -rf "${work}"
-  mkdir -p "${work}"
+  local tagged="${work}/tagged.bam"
+  # the tagged reads of an earlier attempt are kept if they are complete (the
+  # index is written last) and newer than the phaser's VCF and the reads
+  local reuse=""
+  [[ -s "${tagged}.bai" ]] && newer_than "${tagged}" "${base}" && newer_than "${tagged}" "${reads}" && reuse=1
+  if [[ -n "${reuse}" ]]; then
+    find "${work}" -mindepth 1 -maxdepth 1 ! -name tagged.bam ! -name tagged.bam.bai -exec rm -rf {} +
+  else
+    rm -rf "${work}"
+    mkdir -p "${work}"
+  fi
+  : >"${logf}"
 
   "${BCFTOOLS}" view -r "$(IFS=,; echo "${CHROMS[*]}")" -Oz -o "${work}/base.vcf.gz" "${base}"
   "${TABIX}" -f -p vcf "${work}/base.vcf.gz"
 
-  log "${name}: haplotag the reads with the ${phaser} VCF"
-  "${WHATSHAP}" haplotag --reference "${REF}" --sample "${SAMPLE}" --ignore-read-groups \
-      -o "${work}/tagged.bam" "${work}/base.vcf.gz" "${reads}" >"${logf}" 2>&1 \
-    || die "whatshap haplotag failed for ${name}, see ${logf}"
-  "${SAMTOOLS}" index "${work}/tagged.bam"
+  if [[ -n "${reuse}" ]]; then
+    log "${name}: reads tagged with the ${phaser} VCF already there"
+  else
+    log "${name}: haplotag the reads with the ${phaser} VCF, ${METH_THREADS} chromosomes at a time"
+    local order=() parts=() c
+    order=($("${SAMTOOLS}" view -H "${reads}" \
+      | awk -F'\t' '$1 == "@SQ" { for (i = 2; i <= NF; i++) if ($i ~ /^SN:/) print substr($i, 4) }' \
+      | grep -xE 'chr([1-9]|1[0-9]|2[0-2])' || true))
+    [[ ${#order[@]} -eq ${#CHROMS[@]} ]] || die "${name}: ${#order[@]} of chr1-22 in the header of ${reads}"
+    for c in "${order[@]}"; do parts+=("${work}/tagged.${c}.bam"); done
+    "${PARALLEL}" -j "${METH_THREADS}" --halt now,fail=1 \
+        haplotag_part "${work}/base.vcf.gz" "${reads}" {} "${work}/tagged.{}.bam" ::: "${order[@]}" \
+      || { cat "${work}"/tagged.*.bam.log >>"${logf}" 2>/dev/null; die "whatshap haplotag failed for ${name}, see ${logf}"; }
+    cat "${work}"/tagged.*.bam.log >>"${logf}"
+    # the parts go in the order of the header, the order of the sorted input
+    "${SAMTOOLS}" cat -o "${work}/tagged.tmp.bam" "${parts[@]}"
+    "${SAMTOOLS}" index "${work}/tagged.tmp.bam"
+    # whatshap writes every read it fetches, tagged or not: all of them are back
+    local n_in n_out
+    n_in="$("${SAMTOOLS}" idxstats "${reads}" | awk '{ n += $3 } END { print n + 0 }')"
+    n_out="$("${SAMTOOLS}" idxstats "${work}/tagged.tmp.bam" | awk '{ n += $3 } END { print n + 0 }')"
+    [[ "${n_in}" -eq "${n_out}" ]] || die "${name}: ${n_out} of ${n_in} reads in the tagged BAM"
+    rm -f "${parts[@]}" "${work}"/tagged.*.bam.log
+    mv -f "${work}/tagged.tmp.bam.bai" "${tagged}.bai"
+    mv -f "${work}/tagged.tmp.bam" "${tagged}"
+  fi
   "${WHATSHAP}" stats --sample "${SAMPLE}" --gtf "${work}/blocks.gtf" "${work}/base.vcf.gz" >>"${logf}" 2>&1 \
     || die "whatshap stats --gtf failed for ${name}, see ${logf}"
 
