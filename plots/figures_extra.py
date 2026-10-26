@@ -3,8 +3,10 @@ GIAB samples. Same rules as figures.py: one PDF per subfigure, a figure with
 nothing to show raises NoData.
 
   fig7d   read precision, blocks oriented by an anchor read against by SNPs
-  fig7e   read recall against three truths (whatshap on the truth VCF,
-          alignment to the parental Q100 copies, parental k-mers)
+  fig7e   truth-labelled reads not tagged to their haplotype (1 - recall)
+          against three read truths (whatshap on the truth VCF, alignment to
+          the parental Q100 copies, parental k-mers), bars
+  fig7f   tagged reads on the wrong haplotype (1 - precision), the same truths
   fig10a  why reads are not tagged: share of reads per class
   fig10b  the same in bases
   fig10c  confidence of the tagged reads
@@ -17,7 +19,8 @@ nothing to show raises NoData.
   fig12a-d T2T-CHM13 against GRCh38 on the whole genome and in each stratum:
           switch rate, phase block ends, reads tagged, reads on the wrong
           haplotype (the ratio of the two)
-  fig9a-d the other GIAB samples at 30x: switch rate, NG50, read recall, FNR
+  fig9a-d the GIAB samples side by side at 30x, bars: switch rate, NG50,
+          truth-tagged reads missed, FNR
 """
 
 import math
@@ -31,6 +34,7 @@ from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
 
 import style as st
+from bars import bar, group_ticks, label_bar, offsets, scale_axes
 from data import NAN, ratio
 from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks, panel_row,
                      platform_groups, platform_phaser_rows,
@@ -458,94 +462,129 @@ def fig7d(db, ctx, ref):
     return save(fig, ctx, "fig7d_anchor_vs_variant_orientation_" + ref)
 
 
-TRUTH_LABEL = {"truthtags": "Truth VCF", "matpat": "Q100 copies", "yak": "Parental k-mers"}
+TRUTH_LABEL = {"truthtags": "GIAB truth VCF (whatshap haplotag)",
+               "matpat": "Q100 parental copies (alignment)",
+               "yak": "Parental k-mers (yak)"}
+TRUTH_COLOR = {"truthtags": "#B9C4CF", "matpat": "#2C3A4B", "yak": "#6D7F92"}
 
 
-def fig7e(db, ctx, ref):
-    """Read recall of the truth-input runs against the three read-level truths,
-    blocks oriented by an anchor read."""
+def read_truth_bars(db, ctx, ref, column, ylabel, name):
+    """Truth-input runs: a panel per platform, a group per phaser, a bar per
+    read truth - which haplotype a read comes from, by the truth VCF, by
+    alignment to the two parental copies of the Q100 assembly, or by parental
+    k-mers. Blocks are oriented by an anchor read. The bars are the error, not
+    the accuracy: 97% against 98% is invisible on bars, 3% against 2% is not."""
     depth = ctx.depth
-    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 10)
+    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 12)
+    xs, w = offsets(len(TRUTH_LABEL))
     drawn = []
     for ax, platform in zip(axes, st.PLATFORMS):
-        for j, phaser in enumerate(st.PHASERS):
+        phasers = [p for p in st.PHASERS if st.applies(platform, p)]
+        for x, phaser in enumerate(phasers):
             key = (ref, "truth", platform, depth, phaser)
-            for i, truth in enumerate(TRUTH_LABEL):
-                v = 100 * db.get(key, "read_recall_anchor_%s" % truth)
-                if finite(v):
-                    ax.plot(i + (j - 1.5) * 0.15, v, marker=st.PHASER_MARKER[phaser],
-                            color=st.PHASER_COLOR[phaser], markeredgecolor="white", linestyle="none", zorder=3)
+            for dx, truth in zip(xs, TRUTH_LABEL):
+                v = bar(ax, x + dx, 100 * (1 - db.get(key, "%s_anchor_%s" % (column, truth))),
+                        w, TRUTH_COLOR[truth])
+                if v is not None:
                     drawn.append(v)
-        ax.set_xticks(range(len(TRUTH_LABEL)))
-        ax.set_xticklabels(list(TRUTH_LABEL.values()), rotation=35, ha="right", rotation_mode="anchor")
-        ax.set_xlim(-0.6, len(TRUTH_LABEL) - 0.4)
+                    label_bar(ax, x + dx, v, w)
+        group_ticks(ax, [st.PHASER_LABEL[p] for p in phasers])
         ax.set_title(st.PLATFORM_LABEL[platform])
-        y_grid(ax)
     if not drawn:
         plt.close(fig)
         raise NoData("no anchor accuracy for %s at %dx" % (ref, depth))
-    axes[0].set_ylabel("Labelled reads on their\ntruth haplotype (%%), %d×" % depth)
-    top_legend(legend_ax, phaser_handles(line=False))
-    return save(fig, ctx, "fig7e_read_recall_by_truth_%dx_%s" % (depth, ref))
+    scale_axes(axes, drawn, False, ylabel)
+    top_legend(legend_ax, [Patch(color=TRUTH_COLOR[t], label=label) for t, label in TRUTH_LABEL.items()])
+    return save(fig, ctx, name)
+
+
+def fig7e(db, ctx, ref):
+    """Reads with a truth label that the run does not tag to that haplotype:
+    1 - read recall (untagged reads and reads on the wrong haplotype)."""
+    return read_truth_bars(db, ctx, ref, "read_recall",
+                           "Truth-labelled reads not tagged\nto their haplotype (%%), %d×" % ctx.depth,
+                           "fig7e_read_missed_by_truth_%dx_%s" % (ctx.depth, ref))
+
+
+def fig7f(db, ctx, ref):
+    """Tagged reads on the wrong haplotype by each truth: 1 - read precision."""
+    return read_truth_bars(db, ctx, ref, "read_precision",
+                           "Tagged reads on the wrong\nhaplotype (%%), %d×" % ctx.depth,
+                           "fig7f_read_wrong_by_truth_%dx_%s" % (ctx.depth, ref))
 
 
 # ------------------------------------------------------------- other samples
 
+# one neutral shade per sample, darkest first, so a sample never looks like a
+# platform or a phaser
+SAMPLE_SHADES = ["#2C3A4B", "#6D7F92", "#B9C4CF", "#8C8C8C", "#D4D4D4"]
+
+
+def phaser_value(column, scale, complement=False):
+    """value(db, ref, platform, depth, phaser) of the truth-input run"""
+    def value(db, ref, platform, depth, phaser):
+        v = db.get((ref, "truth", platform, depth, phaser), column)
+        return scale * (1 - v) if complement else scale * v
+    return value
+
+
+def caller_value(column, scale):
+    return lambda db, ref, platform, depth, caller: scale * db.call(ref, caller, platform, depth, column)
+
+
 SAMPLE_METRICS = [
-    ("fig9a_samples_switch_rate", "switch_rate", 100, "Switch error rate (%)", True, "phaser"),
-    ("fig9b_samples_block_ng50", "block_ng50", 1e-6, "Phase block NG50 (Mb)", True, "phaser"),
-    ("fig9c_samples_read_recall", "read_recall", 100, "Reads on the truth haplotype,\nof reads tagged by the truth (%)", False, "phaser"),
-    ("fig9d_samples_caller_fnr", "fnr", 100, "Truth het SNPs missed (FNR, %)", True, "caller"),
+    ("fig9a_samples_switch_rate", phaser_value("switch_rate", 100), "Switch error rate (%)", True, "phaser"),
+    ("fig9b_samples_block_ng50", phaser_value("block_ng50", 1e-6), "Phase block NG50 (Mb)", True, "phaser"),
+    ("fig9c_samples_reads_missed", phaser_value("read_recall", 100, complement=True),
+     "Truth-tagged reads not tagged\nto their haplotype (%)", False, "phaser"),
+    ("fig9d_samples_caller_fnr", caller_value("fnr", 100), "Truth het SNPs missed (FNR, %)", True, "caller"),
 ]
 
 
-def samples_figure(dbs, ctx, name, column, scale, ylabel, log, by, depth=30, ref="GRCh38"):
-    samples = list(dbs)
-    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 8)
-    series = st.PHASERS if by == "phaser" else [c for c in st.CALLERS if c != "truth"]
-    color = st.PHASER_COLOR if by == "phaser" else st.CALLER_COLOR
-    marker = st.PHASER_MARKER if by == "phaser" else st.CALLER_MARKER
+def samples_figure(dbs, ctx, name, value, ylabel, log, by, depth=30, ref="GRCh38"):
+    """The GIAB samples side by side at 30x on GRCh38: a panel per platform that
+    two samples or more were sequenced on, a group per phaser on the truth
+    input (or per caller), a bar per sample. Each sample is scored against its
+    own truth (HG002 v5.0q, HG005 v4.2.1, HG001 Platinum Pedigree v1.2), so a
+    difference is the sample and its truth together."""
+    series_all = st.PHASERS if by == "phaser" else [c for c in st.CALLERS if c != "truth"]
+
+    def val(sample, platform, s):
+        v = value(dbs[sample], ref, platform, depth, s)
+        return positive(v) if log else v
+
+    has = lambda sample, platform: any(finite(val(sample, platform, s)) for s in series_all)
+    samples = [s for s in dbs if any(has(s, p) for p in st.PLATFORMS)]
+    platforms = [p for p in st.PLATFORMS if sum(has(s, p) for s in samples) >= 2]
+    if not platforms:
+        raise NoData("no platform with two samples at %dx" % depth)
+    color = {s: SAMPLE_SHADES[i % len(SAMPLE_SHADES)] for i, s in enumerate(samples)}
+    fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 12)
+    xs, w = offsets(len(samples))
     drawn = []
-    for ax, platform in zip(axes, st.PLATFORMS):
-        for j, s in enumerate(series):
-            xs, ys = [], []
-            for i, sample in enumerate(samples):
-                db = dbs[sample]
-                if by == "phaser":
-                    v = scale * db.get((ref, "truth", platform, depth, s), column)
-                else:
-                    v = scale * db.call(ref, s, platform, depth, column)
-                if log:
-                    v = positive(v)
-                if finite(v):
-                    xs.append(i + (j - (len(series) - 1) / 2) * 0.14)
-                    ys.append(v)
-            if xs:
-                ax.plot(xs, ys, marker=marker[s], color=color[s], markeredgecolor="white",
-                        linestyle="none", zorder=3)
-                drawn += ys
-        ax.set_xticks(range(len(samples)))
-        ax.set_xticklabels(samples, rotation=35, ha="right", rotation_mode="anchor")
-        ax.set_xlim(-0.6, len(samples) - 0.4)
+    for ax, platform in zip(axes, platforms):
+        series = [s for s in series_all if by != "phaser" or st.applies(platform, s)]
+        for x, s in enumerate(series):
+            for dx, sample in zip(xs, samples):
+                v = bar(ax, x + dx, val(sample, platform, s), w, color[sample])
+                if v is not None:
+                    drawn.append(v)
+                    label_bar(ax, x + dx, v, w)
+        group_ticks(ax, [st.PHASER_LABEL[s] if by == "phaser" else st.CALLER_LABEL[s] for s in series])
         ax.set_title(st.PLATFORM_LABEL[platform])
-        y_grid(ax)
     if not drawn:
         plt.close(fig)
-        raise NoData("no %s for any sample at %dx" % (column, depth))
-    if log:
-        axes[0].set_yscale("log")
-        log_ticks(axes[0].yaxis, min(drawn), max(drawn))
-    axes[0].set_ylabel("%s, %d×" % (ylabel, depth))
-    from figures import caller_handles
-    top_legend(legend_ax, phaser_handles(line=False) if by == "phaser" else caller_handles(series, line=False))
+        raise NoData("no values for any sample at %dx" % depth)
+    scale_axes(axes, drawn, log, "%s, %d×" % (ylabel, depth))
+    top_legend(legend_ax, [Patch(color=color[s], label=s) for s in samples])
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
 
 
 def sample_figures(dbs, ctx):
     out = []
-    for name, column, scale, ylabel, log, by in SAMPLE_METRICS:
+    for name, value, ylabel, log, by in SAMPLE_METRICS:
         try:
-            out.append(samples_figure(dbs, ctx, name, column, scale, ylabel, log, by))
+            out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by))
         except NoData:
             pass
         finally:
@@ -687,6 +726,7 @@ def fig12d(db, ctx):
 FIGURES_EXTRA = [
     ("fig7d", fig7d, True),
     ("fig7e", fig7e, True),
+    ("fig7f", fig7f, True),
     ("fig10a", fig10a, True),
     ("fig10b", fig10b, True),
     ("fig10c", fig10c, True),
