@@ -13,9 +13,15 @@ VAF is mostly noise. Only chr1-22.
 confident regions). A site is in a stratum if its position is in the stratum's
 BED (regions/prepared_auto, cut to the confident regions).
 
+A VAF of k ALT reads out of n can only be one of n + 1 values, and at odd n
+never exactly 0.5; binned as points, that lattice shows up as spikes and dips
+around 0.5 that are not in the data. So every site is spread evenly over
+[(k - 1/2) / n, (k + 1/2) / n], cut to [0, 1] - a continuity correction: the
+shape is the same, the lattice is gone, and each site still weighs 1.
+
 Output, long format, one line per cell x input x stratum x bin:
   reference sample platform depth input stratum vaf_lo vaf_hi sites
-The last bin is closed, so VAF 1.0 lands in it.
+sites is a weight, so not a whole number; it sums to the number of sites.
 
   python plots/vaf_strata.py --reference GRCh38 --sample HG002 \\
       --stratum segdups=prepared_auto/GRCh38_segdups.bed ... \\
@@ -51,11 +57,30 @@ def init(items, bins, min_reads):
     STRATA, BINS, MIN_READS = load_strata(items), bins, min_reads
 
 
+def spread(k, n):
+    """[(bin, weight)]: one site, k ALT reads of n, spread evenly over
+    [(k - 1/2) / n, (k + 1/2) / n] cut to [0, 1]."""
+    lo, hi = max(0.0, (k - 0.5) / n), min(1.0, (k + 0.5) / n)
+    out = []
+    b = min(BINS - 1, int(lo * BINS))
+    while b < BINS and b / BINS < hi:
+        overlap = min(hi, (b + 1) / BINS) - max(lo, b / BINS)
+        if overlap > 0:
+            out.append((b, overlap / (hi - lo)))
+        b += 1
+    return out
+
+
+def add(counts, share):
+    for b, w in share:
+        counts[b] += w
+
+
 def histogram(job):
     platform, depth, source, sites = job
-    counts = {"genome": [0] * BINS}
+    counts = {"genome": [0.0] * BINS}
     for name, _ in STRATA:
-        counts[name] = [0] * BINS
+        counts[name] = [0.0] * BINS
     with open_text(sites) as fh:
         header = fh.readline().rstrip("\n").split("\t")
         i_ref, i_alt = header.index("n_ref"), header.index("n_alt")
@@ -66,13 +91,13 @@ def histogram(job):
             n_ref, n_alt = int(f[i_ref]), int(f[i_alt])
             if n_ref + n_alt < MIN_READS:
                 continue
-            b = min(BINS - 1, n_alt * BINS // (n_ref + n_alt))
-            counts["genome"][b] += 1
+            share = spread(n_alt, n_ref + n_alt)
+            add(counts["genome"], share)
             pos0 = int(f[1]) - 1
             for name, s in STRATA:
                 if s.contains(f[0], pos0):
-                    counts[name][b] += 1
-    print("%s %sx %s: %d sites" % (platform, depth, source, sum(counts["genome"])), file=sys.stderr)
+                    add(counts[name], share)
+    print("%s %sx %s: %d sites" % (platform, depth, source, round(sum(counts["genome"]))), file=sys.stderr)
     return platform, depth, source, counts
 
 
@@ -114,7 +139,7 @@ def main():
     for platform, depth, source, counts in results:
         for name in order:
             for b, n in enumerate(counts[name]):
-                lines.append("%s\t%s\t%s\t%s\t%s\t%s\t%.4g\t%.4g\t%d\n" % (
+                lines.append("%s\t%s\t%s\t%s\t%s\t%s\t%.4g\t%.4g\t%.3f\n" % (
                     args.reference, args.sample, platform, depth, source, name,
                     b / args.bins, (b + 1) / args.bins, n))
     tmp = "%s.%d.tmp" % (args.out, os.getpid())

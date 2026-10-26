@@ -12,7 +12,9 @@
                               on every platform), a point per phaser. A read is
                               tagged if whatshap haplotag put it on H1/H2 in a
                               block of two or more SNPs, and is in a region if
-                              half its alignment or more lies there. From
+                              half its alignment or more lies there. Reads
+                              wholly outside the confident regions are left
+                              out. --unit bases: the share of read bases. From
                               metrics_reads/<run>.classes.tsv (bin/read_classes.sh).
 
 Both are at one coverage (--depth, 30 by default: the allele matrices and the
@@ -54,7 +56,7 @@ def region_order(db, present):
 # ------------------------------------------------------------ VAF histograms
 
 def load_vaf(root, sample, ref, depth, source):
-    """(platform, stratum) -> counts per bin, in the order of the bins."""
+    """(platform, stratum) -> site weight per bin, the bins in order over [0, 1]."""
     path = os.path.join(sample_root(root, sample), "metrics_strata_auto", "vaf_%s.tsv" % ref)
     if not os.path.exists(path):
         raise NoData("no %s - run bin/vaf_strata.sh" % path)
@@ -65,16 +67,24 @@ def load_vaf(root, sample, ref, depth, source):
             r = dict(zip(header, line.rstrip("\n").split("\t")))
             if r.get("depth") != str(depth) or r.get("input") != source:
                 continue
+            if "." not in r["sites"]:
+                raise NoData("%s counts sites as points - run bin/vaf_strata.sh again" % path)
             k = (r["platform"], r["stratum"])
-            hist.setdefault(k, []).append(int(r["sites"]))
+            hist.setdefault(k, []).append(float(r["sites"]))
     if not hist:
         raise NoData("no %s %dx rows in %s" % (source, depth, path))
     return hist
 
 
-def rebin(counts, factor):
-    n = len(counts) // factor * factor
-    return np.asarray(counts[:n], dtype=float).reshape(-1, factor).sum(axis=1)
+def rebin(counts, width):
+    """Merge neighbouring bins into bins of about `width` (a divisor of the
+    number of bins). Returns the left edges, the width and the weights."""
+    bins = len(counts)
+    factor = max(1, int(round(width * bins)))
+    while bins % factor:
+        factor -= 1
+    c = np.asarray(counts, dtype=float).reshape(-1, factor).sum(axis=1)
+    return np.arange(len(c)) * factor / bins, factor / bins, c
 
 
 def fig_vaf(ctx, db, ref):
@@ -83,14 +93,15 @@ def fig_vaf(ctx, db, ref):
     regions = region_order(db, {k[1] for k in hist if sum(hist[k])})
     if not platforms or not regions:
         raise NoData("no VAF histogram with sites for %s" % ref)
-    nbins = len(next(iter(hist.values())))
-    factor = max(1, int(round(ctx.bin_width * nbins)))
-    width = factor / nbins
-
     rows, cols = len(regions), len(platforms)
     fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, (12 + 21 * rows) * st.MM), constrained_layout=True)
-    # a block per region, its name over the row: too long for a rotated label
-    blocks = fig.subfigures(rows, 1, squeeze=False)[:, 0]
+    # a block per region, its name over the row: too long for a rotated label.
+    # The first and last blocks carry the titles and the x labels, so they are
+    # taller, and every panel ends up the same height.
+    ratios = [1.0] * rows
+    ratios[0] += 0.2
+    ratios[-1] += 0.3
+    blocks = fig.subfigures(rows, 1, squeeze=False, height_ratios=ratios)[:, 0]
     for i, region in enumerate(regions):
         blocks[i].suptitle(stratum_label(region).replace("\n", " "), x=0.01, ha="left",
                            fontsize=st.FONT_SIZE)
@@ -101,15 +112,21 @@ def fig_vaf(ctx, db, ref):
             counts = hist.get((platform, region))
             total = sum(counts) if counts else 0
             if total:
-                c = rebin(counts, factor)
-                density = c / (c.sum() * width)
+                lo, width, c = rebin(counts, ctx.bin_width)
+                density = c / (total * width)
                 peak = max(peak, density.max())
-                lo = np.arange(len(c)) * width
                 ax.bar(lo, density, width=width, align="edge", color=st.PLATFORM_COLOR[platform],
                        linewidth=0, zorder=2)
-                mids = lo + width / 2
-                median = mids[np.searchsorted(np.cumsum(c), c.sum() / 2)]
-                ax.text(0.98, 0.95, "n = %s\nmedian %.2f" % (count_label(total), median),
+                # the median and the share of near-dropouts from the fine bins
+                bins = len(counts)
+                cum = np.cumsum(counts)
+                m = int(np.searchsorted(cum, total / 2))
+                before = cum[m - 1] if m else 0.0
+                median = (m + (total / 2 - before) / counts[m]) / bins if counts[m] else m / bins
+                low = sum(counts[:int(round(0.1 * bins))]) / total
+                ax.text(0.02, 0.95, "n = %s\nmedian %.2f" % (count_label(total), median),
+                        transform=ax.transAxes, ha="left", va="top", color=st.MUTED)
+                ax.text(0.98, 0.95, "VAF < 0.1\n%.1f%%" % (100 * low),
                         transform=ax.transAxes, ha="right", va="top", color=st.MUTED)
             else:
                 ax.text(0.5, 0.5, "no sites", transform=ax.transAxes, ha="center", va="center",
@@ -128,7 +145,7 @@ def fig_vaf(ctx, db, ref):
                 ax.tick_params(labelbottom=False)
         # room over the bars for the counts
         if peak:
-            axes[0].set_ylim(0, 1.35 * peak)
+            axes[0].set_ylim(0, 1.6 * peak)
     return save(fig, ctx, "figR1_vaf_strata_%s" % ref)
 
 
@@ -142,9 +159,18 @@ def count_label(n):
 
 # ---------------------------------------------------- reads tagged per region
 
-def tagged_pct(table, region):
-    tagged = table.get((region, "class", "tagged"), {}).get("reads", math.nan)
-    total = table.get((region, "all", "all"), {}).get("reads", math.nan)
+def tagged_pct(table, region, unit):
+    """Reads (or their bases) tagged, out of those inside the confident regions.
+    A read wholly outside them carries no truth SNP and could never be tagged;
+    the strata are cut to the confident regions, so "genome" has to be too, or
+    it comes out below both the easy and the difficult regions."""
+    def get(gtype, group):
+        return table.get((region, gtype, group), {}).get(unit, math.nan)
+    tagged = get("class", "tagged")
+    total = get("all", "all")
+    outside = get("class", "no_snp_outside_bed")
+    if finite(total) and finite(outside):
+        total -= outside
     return 100 * tagged / total if finite(tagged) and finite(total) and total else math.nan
 
 
@@ -158,7 +184,7 @@ def fig_tagged(ctx, db, ref):
                 continue
             table = db.classes((ref, ctx.caller, platform, ctx.depth, phaser))
             for region in {k[0] for k in table}:
-                v = tagged_pct(table, region)
+                v = tagged_pct(table, region, ctx.unit)
                 if finite(v):
                     values.setdefault(phaser, {}).setdefault(platform, {})[region] = v
                     present.add(region)
@@ -194,7 +220,8 @@ def fig_tagged(ctx, db, ref):
                 if v is not None:
                     ax.plot(i + off, v, marker=st.PHASER_MARKER[phaser], color=color,
                             markeredgecolor="white", linestyle="none", zorder=3)
-        ax.set_title(stratum_label(region).replace("\n", " "))
+        title = "Confident regions (chr1-22)" if region == "genome" else stratum_label(region)
+        ax.set_title(title.replace("\n", " "))
         ax.set_xticks(x)
         ax.set_xticklabels([PLATFORM_SHORT[p] for p in platforms])
         ax.set_xlim(-0.6, len(platforms) - 0.4)
@@ -203,12 +230,13 @@ def fig_tagged(ctx, db, ref):
         if n % ncols:
             ax.tick_params(labelleft=False)
         else:
-            ax.set_ylabel("Reads tagged (%)")
+            ax.set_ylabel("%s tagged (%%)" % ("Reads" if ctx.unit == "reads" else "Read bases"))
 
     handles = [Patch(color=st.PLATFORM_COLOR[p], alpha=0.3, label=st.PLATFORM_LABEL[p]) for p in platforms]
     handles += [series_handle(st.INK, st.PHASER_MARKER[p], st.PHASER_LABEL[p], line=False) for p in phasers]
     top_legend(legend_ax, handles, ncol=min(len(handles), 5))
-    return save(fig, ctx, "figR2_tagged_strata_%s" % ref)
+    suffix = "" if ctx.unit == "reads" else "_bases"
+    return save(fig, ctx, "figR2_tagged_strata%s_%s" % (suffix, ref))
 
 
 # ------------------------------------------------------------------ main
@@ -227,7 +255,10 @@ def main():
     parser.add_argument("--input", default="truth", help="sites of the VAF figure: truth or a caller")
     parser.add_argument("--caller", default="truth", help="phaser input of the tagged-reads figure")
     parser.add_argument("--phasers", default=" ".join(st.PHASERS))
-    parser.add_argument("--bin-width", type=float, default=0.02)
+    parser.add_argument("--unit", choices=["reads", "bases"], default="reads",
+                        help="tagged-reads figure: share of reads or of their bases")
+    parser.add_argument("--bin-width", type=float, default=0.02,
+                        help="VAF bin width, a multiple of the bins of vaf_strata.py (0.01)")
     parser.add_argument("--png", action="store_true", help="a PNG next to each PDF")
     ctx = parser.parse_args()
     ctx.out = ctx.out or os.path.join(ctx.root, "plots", "pdf")
