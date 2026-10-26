@@ -37,10 +37,12 @@ import style as st
 from data import sample_root
 from figures import NoData, panel_row, platform_handles, save, top_legend, y_grid
 
-# groups of the SNP count, wider as it grows: (low, high, label)
-GROUPS = [(1, 1, "1"), (2, 2, "2"), (3, 3, "3"), (4, 4, "4"), (5, 6, "5-6"), (7, 9, "7-9"),
-          (10, 14, "10-14"), (15, 19, "15-19"), (20, 29, "20-29"), (30, 49, "30-49"),
-          (50, 99, "50-99"), (100, 199, "100-199"), (200, 10 ** 9, "200+")]
+# groups of the SNP count, wider as it grows: (low, high, label). Reads with
+# 100 or more SNPs are few (mostly ultra-long ONT reads and hyper-polymorphic
+# regions); on their own they make a noisy last point, so they are pooled
+# into 50+.
+GROUPS = [(1, 1, "1"), (2, 2, "2"), (3, 4, "3-4"), (5, 9, "5-9"), (10, 19, "10-19"),
+          (20, 49, "20-49"), (50, 10 ** 9, "50+")]
 COUNT_LABEL = {"snps": "Het SNPs hit by the read", "votes": "Phased SNPs the read votes with"}
 
 
@@ -83,7 +85,6 @@ def group_axis(ax, last):
     ax.xaxis.set_major_locator(FixedLocator(ticks))
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, i: GROUPS[i][2] if i is not None and i < len(ticks) else ""))
     ax.xaxis.set_minor_locator(NullLocator())
-    ax.tick_params(axis="x", labelrotation=90)
     ax.set_xlim(ticks[0] / 1.3, ticks[-1] * 1.3)
 
 
