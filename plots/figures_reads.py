@@ -102,8 +102,9 @@ def by_phaser(ctx, ref, name, i, j, min_den, ylabel, ylim=None):
             xs, ys = grouped(table, i, j, min_den)
             if not any(math.isfinite(y) for y in ys):
                 continue
+            # not clipped, so a point at exactly 100% stays whole at the top
             ax.plot(xs, ys, color=st.PLATFORM_COLOR[platform], marker=st.PLATFORM_MARKER[platform],
-                    markeredgecolor="white", zorder=3)
+                    markeredgecolor="white", zorder=3, clip_on=False)
             drawn += [y for y in ys if math.isfinite(y)]
             last = max([last] + [g for g, y in enumerate(ys) if math.isfinite(y)])
         ax.set_title(st.PHASER_LABEL[phaser])
@@ -125,9 +126,30 @@ def by_phaser(ctx, ref, name, i, j, min_den, ylabel, ylim=None):
     return save(fig, ctx, name)
 
 
+def accuracy_floor(ctx):
+    """The bottom of the accuracy axis, the same for every reference so the
+    PDFs compare side by side: the lowest point of any of them, rounded down
+    to a multiple of 5 with a little room."""
+    lows = []
+    for ref in ctx.refs.split():
+        try:
+            data = load(ctx.root, ctx.sample, ref, ctx.depth, ctx.caller, ctx.count)
+        except NoData:
+            continue
+        for (platform, phaser), table in data.items():
+            if phaser in ctx.phasers:
+                lows += [y for y in grouped(table, 3, 2, ctx.min_compared)[1] if math.isfinite(y)]
+    if not lows:
+        return 0.0
+    lo = min(lows)
+    return max(0.0, 5 * math.floor((lo - 0.05 * (100 - lo)) / 5))
+
+
 def fig_accuracy(ctx, ref):
+    if ctx.acc_ymin is None:
+        ctx.acc_ymin = accuracy_floor(ctx)
     return by_phaser(ctx, ref, "figR3a_accuracy_vs_snps_%s" % ref, 3, 2, ctx.min_compared,
-                     "Haplotag accuracy (%)")
+                     "Haplotag accuracy (%)", ylim=(ctx.acc_ymin, 100))
 
 
 def fig_tagged(ctx, ref):
@@ -194,6 +216,9 @@ def main():
     parser.add_argument("--phasers", default="whatshap longphase margin hapcut2 hiphase")
     parser.add_argument("--min-compared", type=int, default=200,
                         help="fewest reads behind a point")
+    parser.add_argument("--acc-ymin", type=float, default=None,
+                        help="bottom of the y axis of figR3a (top is 100); by default the lowest "
+                             "point over all --refs, so the references share it")
     parser.add_argument("--ymax", type=float, default=None, help="top of the y axis of figR3c")
     parser.add_argument("--png", action="store_true", help="a PNG next to each PDF")
     ctx = parser.parse_args()
