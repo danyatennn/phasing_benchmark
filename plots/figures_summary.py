@@ -136,10 +136,11 @@ def donut(ax, counts, center, min_label, min_slice):
         sides[1 if x >= 0 else -1].append((1.15 * y, x, y, "%s (%.1f%%)" % (short(v[3]), 100 * share)))
     for sign, labels in sides.items():
         for ty, x, y, text in spread(labels, 0.34, low=-1.45, high=1.45):
-            ax.annotate(text, xy=(1.01 * x, 1.01 * y), xytext=(sign * 1.3, ty),
+            # the line stops a few points short of the text
+            ax.annotate(text, xy=(1.01 * x, 1.01 * y), xytext=(sign * 1.32, ty),
                         ha="left" if sign > 0 else "right", va="center", color=st.INK,
                         fontsize=st.FONT_SIZE - 1,
-                        arrowprops=dict(arrowstyle="-", color=st.MUTED, linewidth=0.5, shrinkA=0, shrinkB=0))
+                        arrowprops=dict(arrowstyle="-", color=st.MUTED, linewidth=0.5, shrinkA=4, shrinkB=0))
     ax.set_xlim(-2.45, 2.45)
     ax.set_ylim(-1.45, 1.45)
     ax.set_aspect("equal")
@@ -545,7 +546,110 @@ def fig_r9(ctx):
     return ", ".join(made)
 
 
-FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9)]
+# --------------------------------------- R10: difficult regions, GRCh38 vs T2T
+
+STRATA_R10 = [
+    ("notinalldifficultregions", "Easy regions"),
+    ("alldifficultregions", "All difficult"),
+    ("segdups", "SegDups"),
+    ("lowmappabilityall", "Low mappability"),
+    ("AllTandemRepeatsandHomopolymers_slop5", "TR and homopol"),
+    ("satellites_slop5", "Satellites"),
+    ("MHC", "MHC"),
+]
+R10_METRICS = [
+    ("switch", "Switch error rate (%)"),
+    ("n50", "Block N50 (Mb)"),
+    ("accuracy", "Haplotag accuracy (%)"),
+]
+
+
+def zoomed(values, lo_cap=None, hi_cap=None):
+    """y limits around the values, not from 0: the references differ by little"""
+    v = [x for x in values if x == x]
+    if not v:
+        return 0, 1
+    lo, hi = min(v), max(v)
+    pad = 0.12 * (hi - lo or abs(hi) * 0.1 or 1)
+    lo, hi = lo - pad, hi + pad
+    if lo_cap is not None:
+        lo = max(lo, lo_cap)
+    if hi_cap is not None:
+        hi = min(hi, hi_cap)
+    return lo, hi
+
+
+def fig_r10(ctx):
+    strata_rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv"))
+                   if r.get("caller") == ctx.caller and int(float(r.get("depth", 0))) == ctx.depth
+                   and r.get("phaser") == ctx.phaser]
+    class_rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+                  if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
+                  and r.get("phaser") == ctx.phaser and r.get("group_type") == "all"]
+    if not strata_rows:
+        raise NoData("no %s %s %dx rows in summary_phase_strata.tsv" % (ctx.caller, ctx.phaser, ctx.depth))
+    val = {}
+    for r in strata_rows:
+        k = (r["reference"], r["platform"], r["stratum"])
+        val[("switch",) + k] = 100 * num(r["switch_rate"])
+        val[("n50",) + k] = num(r["block_n50"]) / 1e6
+    for r in class_rows:
+        k = (r["reference"], r["platform"], r["stratum"])
+        comp = num(r["compared"])
+        if comp:
+            val[("accuracy",) + k] = 100 * num(r["correct"]) / comp
+    refs = [r for r in st.REFERENCES if any(k[1] == r for k in val)]
+    platforms = [p for p in st.PLATFORMS if any(k[2] == p for k in val)]
+    strata = [(s, l) for s, l in STRATA_R10 if any(k[3] == s for k in val)]
+    metrics = [(m, l) for m, l in R10_METRICS if any(k[0] == m for k in val)]
+
+    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, (30 + 40 * len(metrics)) * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(len(metrics) + 1, len(platforms), height_ratios=[0.1] + [1] * len(metrics))
+    legend_ax = fig.add_subplot(grid[0, :])
+    legend_ax.axis("off")
+    width = 0.8 / len(refs)
+    for i, (m, label) in enumerate(metrics):
+        lo, hi = zoomed([v for k, v in val.items() if k[0] == m],
+                        lo_cap=0, hi_cap=100 if m != "n50" else None)
+        first = None
+        for j, p in enumerate(platforms):
+            ax = fig.add_subplot(grid[1 + i, j], sharey=first)
+            first = first or ax
+            for si, (s, _) in enumerate(strata):
+                for ri, ref in enumerate(refs):
+                    y = val.get((m, ref, p, s), math.nan)
+                    if y != y:
+                        continue
+                    x = si + (ri - (len(refs) - 1) / 2) * width
+                    grch = ref == "GRCh38"
+                    ax.bar(x, y - lo, bottom=lo, width=width * 0.9, linewidth=0.6, zorder=2,
+                           color="white" if grch else st.PLATFORM_COLOR[p],
+                           edgecolor=st.PLATFORM_COLOR[p], hatch="////" if grch else None)
+            ax.set_ylim(lo, hi)
+            if lo > 0:
+                axis_break(ax)
+            ax.set_xticks(range(len(strata)))
+            if i == len(metrics) - 1:
+                ax.set_xticklabels([l for _, l in strata], rotation=50, ha="right", rotation_mode="anchor")
+            else:
+                ax.set_xticklabels([])
+            if j:
+                ax.tick_params(labelleft=False)
+            else:
+                ax.set_ylabel(label)
+            if i == 0:
+                ax.set_title(st.PLATFORM_LABEL[p])
+            y_grid(ax)
+            ax.set_xlim(-0.6, len(strata) - 0.4)
+    handles = [Patch(facecolor="white", edgecolor=st.INK, hatch="////", label="GRCh38"),
+               Patch(facecolor=st.MUTED, edgecolor=st.MUTED, label="T2T-CHM13 (platform colour)")]
+    top_legend(legend_ax, handles)
+    fig.suptitle("%s, %s input, %dx: genomic regions on GRCh38 and T2T-CHM13" % (
+        st.PHASER_LABEL[ctx.phaser], st.CALLER_LABEL.get(ctx.caller, ctx.caller), ctx.depth))
+    return save(fig, ctx, "figR10_regions_refs_%s" % ctx.phaser)
+
+
+FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10)]
 
 
 def main():
