@@ -38,7 +38,7 @@ from matplotlib.patches import Patch
 
 import style as st
 from data import sample_root
-from figures import NoData, log_ticks, save, series_handle, stratum_label, top_legend, y_grid
+from figures import NoData, colorbar, heatmap, log_ticks, save, series_handle, stratum_label, top_legend, y_grid
 
 
 # ------------------------------------------------------------------ helpers
@@ -112,9 +112,10 @@ def spread(labels, gap, low=-1.35, high=1.35):
     return [(y,) + t[1:] for y, t in zip(ys, labels)]
 
 
-def donut(ax, counts, center, min_label, min_slice):
+def donut(ax, counts, center, min_label, min_slice, classes=None):
     total = sum(counts.values())
-    vals = [(k, col, hatch, counts.get(k, 0)) for k, _, col, hatch in CLASSES if counts.get(k, 0) > 0]
+    vals = [(k, col, hatch, counts.get(k, 0)) for k, _, col, hatch in (classes or CLASSES)
+            if counts.get(k, 0) > 0]
     # a slice of a fraction of a percent is a hairline: drawn at min_slice of
     # the ring at least (the labels keep the true numbers; said in the figure)
     drawn = [max(v[3], min_slice * total) for v in vals]
@@ -147,7 +148,10 @@ def donut(ax, counts, center, min_label, min_slice):
     ax.axis("off")
 
 
-def fig_r5(ctx):
+def donut_figure(ctx, group_type, classes, center_word, title, name, share=True):
+    """Donuts of the reads of genome-wide read classes (bin/read_classes.sh),
+    a row per platform, the references side by side. group_type: class (why
+    untagged) or confidence (the SNP votes behind the read's haplotype)."""
     rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
             if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
             and r.get("phaser") == ctx.phaser and r.get("stratum") == "genome"]
@@ -156,7 +160,7 @@ def fig_r5(ctx):
     data = {}
     for r in rows:
         key = (r["reference"], r["platform"])
-        if r["group_type"] in ("class", "all"):
+        if r["group_type"] in (group_type, "all"):
             data.setdefault(key, {})[r["group"]] = num(r["reads"])
     refs = [r for r in st.REFERENCES if any(k[0] == r for k in data)]
     platforms = [p for p in st.PLATFORMS if any(k[1] == p for k in data)]
@@ -172,25 +176,50 @@ def fig_r5(ctx):
             if not counts:
                 ax.axis("off")
                 continue
-            untagged = {k: counts.get(k, 0) for k, *_ in CLASSES}
+            part = {k: counts.get(k, 0) for k, *_ in classes}
             total_reads = counts.get("all", math.nan)
-            n = sum(untagged.values())
-            center = "%s\nuntagged\n(%.1f%%)" % (short(n), 100 * n / total_reads) \
-                if total_reads == total_reads else "%s\nuntagged" % short(n)
-            donut(ax, untagged, center, ctx.min_label, ctx.min_slice)
+            n = sum(part.values())
+            if share and total_reads == total_reads:
+                center = "%s\n%s\n(%.1f%%)" % (short(n), center_word, 100 * n / total_reads)
+            else:
+                center = "%s\n%s" % (short(n), center_word)
+            donut(ax, part, center, ctx.min_label, ctx.min_slice, classes)
             if i == 0:
                 ax.set_title(st.REFERENCE_LABEL[ref], pad=4)
         fig.text(0.02, top - (top - bottom) * (i + 0.5) / len(platforms), st.PLATFORM_LABEL[platform],
                  rotation=90, ha="center", va="center")
-    handles = [Patch(facecolor=c, hatch=h, edgecolor="white", label=l) for _, l, c, h in CLASSES]
+    handles = [Patch(facecolor=c, hatch=h, edgecolor="white", label=l) for _, l, c, h in classes]
     fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.55, 0.02))
     if ctx.min_slice > 0:
         fig.text(0.55, 0.005, "Slices under %g%% are drawn at %g%% so they can be seen; the labels give the "
                  "true numbers." % (100 * ctx.min_slice, 100 * ctx.min_slice), ha="center", va="bottom",
                  color=st.MUTED, fontsize=st.FONT_SIZE - 1)
-    fig.suptitle("Why reads stay untagged: %s, %s input, %dx, chr1-22" % (
-        st.PHASER_LABEL[ctx.phaser], st.CALLER_LABEL.get(ctx.caller, ctx.caller), ctx.depth), y=0.99)
-    return save(fig, ctx, "figR5_untagged_reasons_%s" % ctx.phaser)
+    fig.suptitle("%s: %s, %s input, %dx, chr1-22" % (
+        title, st.PHASER_LABEL[ctx.phaser], st.CALLER_LABEL.get(ctx.caller, ctx.caller), ctx.depth), y=0.99)
+    return save(fig, ctx, "%s_%s" % (name, ctx.phaser))
+
+
+def fig_r5(ctx):
+    return donut_figure(ctx, "class", CLASSES, "untagged", "Why reads stay untagged", "figR5_untagged_reasons")
+
+
+# --------------------------------------------- R11: SNP votes behind a read
+
+# the read's votes: at each phased het SNP of its block it carries the allele of
+# haplotype 1 or 2 (plots/read_classes.py); a read without a tag is counted
+# in the block that would count most
+VOTES = [
+    ("high", "≥2 votes, all for one haplotype", "#2F5D50", None),
+    ("medium", "≥2 votes, majority with dissent", "#7FA693", None),
+    ("single", "a single vote", "#D7B65D", None),
+    ("tie", "as many votes for each", "#D9876A", None),
+    ("none", "no vote", "#C9D1D8", None),
+]
+
+
+def fig_r11(ctx):
+    return donut_figure(ctx, "confidence", VOTES, "reads", "SNP votes behind each read's haplotype",
+                        "figR11_read_votes", share=False)
 
 
 # ------------------------------------------- R6: phasing and haplotag rates
@@ -649,7 +678,251 @@ def fig_r10(ctx):
     return save(fig, ctx, "figR10_regions_refs_%s" % ctx.phaser)
 
 
-FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10)]
+# ------------------------------------- R12: phasing in easy and hard regions
+
+R12_METRICS = [
+    ("switch", "Switch error\nrate (%)"),
+    ("hamming", "Hamming error\nrate (%)"),
+    ("n50", "Block N50 (Mb)"),
+    ("accuracy", "Haplotag\naccuracy (%)"),
+]
+
+
+def fig_r12(ctx):
+    strata_rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv"))
+                   if r.get("caller") == ctx.caller and int(float(r.get("depth", 0))) == ctx.depth
+                   and r.get("phaser") == ctx.phaser]
+    class_rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+                  if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
+                  and r.get("phaser") == ctx.phaser and r.get("group_type") == "all"]
+    if not strata_rows:
+        raise NoData("no %s %s %dx rows in summary_phase_strata.tsv" % (ctx.caller, ctx.phaser, ctx.depth))
+    val = {}
+    for r in strata_rows:
+        k = (r["reference"], r["platform"], r["stratum"])
+        val[("switch",) + k] = 100 * num(r["switch_rate"])
+        val[("hamming",) + k] = 100 * num(r.get("hamming_rate"))
+        val[("n50",) + k] = num(r["block_n50"]) / 1e6
+    for r in class_rows:
+        comp = num(r["compared"])
+        if comp:
+            val[("accuracy", r["reference"], r["platform"], r["stratum"])] = 100 * num(r["correct"]) / comp
+    made = []
+    for ref in st.REFERENCES:
+        keys = [k for k in val if k[1] == ref and val[k] == val[k]]
+        if not keys:
+            continue
+        platforms = [p for p in st.PLATFORMS if any(k[2] == p for k in keys)]
+        strata = [(s_, l) for s_, l in STRATA_R8 if any(k[3] == s_ for k in keys)]
+        metrics = [(m, l) for m, l in R12_METRICS if any(k[0] == m for k in keys)]
+        fig, axes = plt.subplots(len(metrics), 1, squeeze=False, sharex=True,
+                                 figsize=(st.FULL_WIDTH * st.MM, (34 + 32 * len(metrics)) * st.MM),
+                                 constrained_layout=True)
+        width = 0.8 / len(platforms)
+        for ax, (m, label) in zip(axes[:, 0], metrics):
+            drawn = []
+            for si, (s_, _) in enumerate(strata):
+                for j, p in enumerate(platforms):
+                    y = val.get((m, ref, p, s_), math.nan)
+                    if y != y:
+                        continue
+                    drawn.append(y)
+                    ax.bar(si + (j - (len(platforms) - 1) / 2) * width, y, width=width * 0.9,
+                           color=st.PLATFORM_COLOR[p], linewidth=0, zorder=2)
+            if m == "accuracy" and drawn:
+                lo, hi = zoomed(drawn, lo_cap=0, hi_cap=100)
+                ax.set_ylim(lo, hi)
+                for si, (s_, _) in enumerate(strata):
+                    if not any((m, ref, p, s_) in val for p in platforms):
+                        ax.text(si, lo + 0.05 * (hi - lo), "n/a", ha="center", color=st.MUTED,
+                                fontsize=st.FONT_SIZE - 1)
+                if lo > 0:
+                    axis_break(ax)
+            ax.set_ylabel(label)
+            y_grid(ax)
+            # easy regions apart from the difficult ones
+            ax.axvline(0.5, color=st.MUTED, linestyle=":", linewidth=0.6)
+        ax = axes[-1, 0]
+        ax.set_xticks(range(len(strata)))
+        ax.set_xticklabels([l for _, l in strata], rotation=40, ha="right", rotation_mode="anchor")
+        ax.set_xlim(-0.6, len(strata) - 0.4)
+        axes[0, 0].legend(handles=[Patch(color=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p])
+                                   for p in platforms],
+                          loc="lower center", bbox_to_anchor=(0.5, 1.08), ncol=len(platforms))
+        fig.suptitle("Phasing across genomic regions: %s, %s, %s input, %dx" % (
+            st.REFERENCE_LABEL[ref], st.PHASER_LABEL[ctx.phaser],
+            st.CALLER_LABEL.get(ctx.caller, ctx.caller), ctx.depth))
+        made.append(save(fig, ctx, "figR12_regions_phasing_%s_%s" % (ctx.phaser, ref)))
+    return ", ".join(made)
+
+
+# ------------------------------------------------ R13: what each region is
+
+STRATUM_BAR = "#4A5C70"
+
+
+def fig_r13(ctx):
+    made = []
+    for ref in st.REFERENCES:
+        stats = {r["stratum"]: r for r in table(path_of(ctx, "metrics_strata_auto",
+                                                         "regions_statistics_%s.tsv" % ref))}
+        mech = {}
+        for r in table(path_of(ctx, "metrics_strata_auto", "mechanism_%s.tsv" % ref)):
+            if r.get("caller") == "-" and r.get("depth") == str(ctx.depth):
+                mech[(r["platform"], r["stratum"], r["metric"])] = num(r["value"])
+        if not stats:
+            continue
+        strata = [(s_, l) for s_, l in STRATA_R10 if s_ in stats]
+        platforms = [p for p in st.PLATFORMS if any(k[0] == p for k in mech)]
+
+        def stat(s_, col):
+            return num(stats[s_].get(col))
+
+        def share(s_, col):
+            n = stat(s_, "src_variants")
+            return 100 * stat(s_, col) / n if n else math.nan
+
+        # (label, per stratum value or None, per platform metric or None, log, scale)
+        rows = [
+            ("Size in the\nbenchmark (Mb)", lambda s_: stat(s_, "bp") / 1e6, None, True),
+            ("Truth het SNPs", lambda s_: stat(s_, "truth_het_snps"), None, True),
+            ("Het SNPs per Mb", lambda s_: stat(s_, "het_snps_per_mb"), None, False),
+            ("Median distance\nbetween het SNPs (bp)", lambda s_: stat(s_, "median_inter_snp_dist"), None, True),
+            ("Indels (% of\ntruth variants)", lambda s_: share(s_, "src_indel"), None, False),
+            ("1/2 genotypes (%\nof truth variants)", lambda s_: share(s_, "src_1_2"), None, False),
+            ("Mean |VAF − 0.5|", None, ("vaf_dev", 1), False),
+            ("Neighbouring SNP pairs\nwith >2 haplotypes (%)", None, ("paralog_link_frac", 100), False),
+            ("Depth / genome", None, ("depth_ratio", 1), False),
+            ("Depth with\nMAPQ < 20 (%)", None, ("lowmapq_frac", 100), False),
+        ]
+        rows = [r for r in rows if r[1] is not None or (platforms and any(
+            (p, s_, r[2][0]) in mech for p in platforms for s_, _ in strata))]
+        fig, axes = plt.subplots(len(rows), 1, squeeze=False, sharex=True,
+                                 figsize=(st.FULL_WIDTH * st.MM, (30 + 21 * len(rows)) * st.MM),
+                                 constrained_layout=True)
+        width = 0.8 / max(1, len(platforms))
+        for ax, (label, per_stratum, per_platform, log) in zip(axes[:, 0], rows):
+            values = []
+            if per_stratum is not None:
+                for si, (s_, _) in enumerate(strata):
+                    y = per_stratum(s_)
+                    if y == y and (y > 0 or not log):
+                        values.append(y)
+                        ax.bar(si, y, width=0.55, color=STRATUM_BAR, linewidth=0, zorder=2)
+                        ax.annotate(tick_label(y), (si, y), xytext=(0, 1.5), textcoords="offset points",
+                                    ha="center", va="bottom", fontsize=st.FONT_SIZE - 2)
+            else:
+                metric, scale = per_platform
+                for si, (s_, _) in enumerate(strata):
+                    for j, p in enumerate(platforms):
+                        y = mech.get((p, s_, metric), math.nan) * scale
+                        if y == y:
+                            ax.bar(si + (j - (len(platforms) - 1) / 2) * width, y, width=width * 0.9,
+                                   color=st.PLATFORM_COLOR[p], linewidth=0, zorder=2)
+                if metric == "depth_ratio":
+                    ax.axhline(1, color=st.MUTED, linestyle="--", linewidth=0.6)
+            if log and values:
+                # plain numbers on the log axis, not 10^x
+                ax.set_yscale("log")
+                lo, hi = min(values) / 2, max(values) * 4
+                ax.set_ylim(lo, hi)
+                log_ticks(ax.yaxis, lo, hi)
+            else:
+                ax.margins(y=0.25)
+            ax.set_ylabel(label, fontsize=st.FONT_SIZE - 1)
+            y_grid(ax)
+            ax.axvline(0.5, color=st.MUTED, linestyle=":", linewidth=0.6)
+        ax = axes[-1, 0]
+        ax.set_xticks(range(len(strata)))
+        ax.set_xticklabels([l for _, l in strata], rotation=30, ha="right", rotation_mode="anchor")
+        ax.set_xlim(-0.6, len(strata) - 0.4)
+        if platforms:
+            axes[0, 0].legend(handles=[Patch(color=STRATUM_BAR, label="Region (same for every platform)")] +
+                              [Patch(color=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p]) for p in platforms],
+                              loc="lower center", bbox_to_anchor=(0.5, 1.15), ncol=3)
+        fig.suptitle("The genomic regions on %s: size, variants and what the reads see (%dx)" % (
+            st.REFERENCE_LABEL[ref], ctx.depth))
+        made.append(save(fig, ctx, "figR13_regions_profile_%s" % ref))
+    if not made:
+        raise NoData("no regions_statistics_<ref>.tsv - run regions_statistics.sh")
+    return ", ".join(made)
+
+
+def tick_label(v):
+    if v >= 1e6:
+        return "%.1fM" % (v / 1e6)
+    if v >= 1e4:
+        return "%.0fk" % (v / 1e3)
+    if v >= 100:
+        return "%.0f" % v
+    if v >= 10:
+        return "%.1f" % v
+    return "%.2g" % v
+
+
+# -------------------------------------- R14: callers' input, by region
+
+# the platform names on two lines: they label groups of three or four rows
+PLATFORM_TWO_LINES = {"ont4k": "ONT\n4 kHz", "ont5k": "ONT\n5 kHz", "hifi": "PacBio\nSequel II",
+                      "revio": "PacBio\nRevio"}
+
+def fig_r14(ctx):
+    """Heatmaps of phasing on each caller's het SNPs, per genomic region:
+    the truth het SNPs of the region phased correctly (correct / truth_total,
+    the same denominator for every input, so callers compare), and how many
+    points of it each caller loses against the truth input. Rows: platform x
+    input, columns: regions."""
+    rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv"))
+            if int(float(r.get("depth", 0))) == ctx.depth and r.get("phaser") == ctx.phaser]
+    if not rows:
+        raise NoData("no %s %dx rows in summary_phase_strata.tsv" % (ctx.phaser, ctx.depth))
+    val = {}
+    for r in rows:
+        tt = num(r.get("truth_total"))
+        v = 100 * num(r.get("correct")) / tt if tt else 100 * num(r.get("recall_phased"))
+        val[(r["reference"], r["caller"], r["platform"], r["stratum"])] = v
+    inputs = [c for c in st.CALLERS if any(k[1] == c for k in val)]
+    callers = [c for c in inputs if c != "truth"]
+    if not callers:
+        raise NoData("no caller input in summary_phase_strata.tsv")
+    made = []
+    for ref in st.REFERENCES:
+        keys = [k for k in val if k[0] == ref]
+        if not keys:
+            continue
+        platforms = [p for p in st.PLATFORMS if any(k[2] == p for k in keys)]
+        strata = [(s_, l) for s_, l in STRATA_R8 if any(k[3] == s_ for k in keys)]
+        # darker = more: more phased correctly / more lost to the caller
+        for tag, row_inputs, value, bar_label in (
+                ("phased", inputs, lambda p, c, s_: val.get((ref, c, p, s_), math.nan),
+                 "Truth het SNPs phased correctly (%)"),
+                ("loss", callers, lambda p, c, s_: val.get((ref, "truth", p, s_), math.nan)
+                 - val.get((ref, c, p, s_), math.nan),
+                 "Points lost against the truth input")):
+            line = [(p, c) for p in platforms for c in row_inputs]
+            matrix = [[value(p, c, s_) for s_, _ in strata] for p, c in line]
+            shown = [v for row in matrix for v in row if v == v]
+            if not shown:
+                continue
+            fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * st.MM, (30 + 5.2 * len(line)) * st.MM),
+                                   constrained_layout=True)
+            im = heatmap(ax, matrix, [st.CALLER_LABEL[c] for _, c in line], [l for _, l in strata],
+                         [(PLATFORM_TWO_LINES[p], len(row_inputs)) for p in platforms],
+                         [("", len(strata))], label=lambda v: "%.1f" % v, cmap=st.SEQUENTIAL,
+                         vmin=min(shown), vmax=max(shown))
+            plt.setp(ax.get_xticklabels(), rotation=40, ha="right", rotation_mode="anchor")
+            colorbar(fig, im, ax, bar_label)
+            fig.suptitle("%s: %s, %s, %dx, on each input's het SNPs" % (
+                bar_label, st.REFERENCE_LABEL[ref], st.PHASER_LABEL[ctx.phaser], ctx.depth))
+            made.append(save(fig, ctx, "figR14_callers_%s_%s_%s" % (tag, ctx.phaser, ref)))
+    if not made:
+        raise NoData("nothing to draw")
+    return ", ".join(made)
+
+
+FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10),
+           ("R11", fig_r11), ("R12", fig_r12), ("R13", fig_r13),
+           ("R14", fig_r14)]
 
 
 def main():
