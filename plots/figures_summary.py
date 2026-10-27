@@ -112,10 +112,13 @@ def spread(labels, gap, low=-1.35, high=1.35):
     return [(y,) + t[1:] for y, t in zip(ys, labels)]
 
 
-def donut(ax, counts, center, min_label):
+def donut(ax, counts, center, min_label, min_slice):
     total = sum(counts.values())
     vals = [(k, col, hatch, counts.get(k, 0)) for k, _, col, hatch in CLASSES if counts.get(k, 0) > 0]
-    wedges, _ = ax.pie([v[3] for v in vals], radius=1.0, startangle=90, counterclock=False,
+    # a slice of a fraction of a percent is a hairline: drawn at min_slice of
+    # the ring at least (the labels keep the true numbers; said in the figure)
+    drawn = [max(v[3], min_slice * total) for v in vals]
+    wedges, _ = ax.pie(drawn, radius=1.0, startangle=90, counterclock=False,
                        colors=[v[1] for v in vals],
                        wedgeprops=dict(width=0.3, edgecolor="white", linewidth=0.8))
     for w, v in zip(wedges, vals):
@@ -132,7 +135,7 @@ def donut(ax, counts, center, min_label):
         x, y = math.cos(ang), math.sin(ang)
         sides[1 if x >= 0 else -1].append((1.15 * y, x, y, "%s (%.1f%%)" % (short(v[3]), 100 * share)))
     for sign, labels in sides.items():
-        for ty, x, y, text in spread(labels, 0.3, low=-1.4, high=1.4):
+        for ty, x, y, text in spread(labels, 0.34, low=-1.45, high=1.45):
             ax.annotate(text, xy=(1.01 * x, 1.01 * y), xytext=(sign * 1.3, ty),
                         ha="left" if sign > 0 else "right", va="center", color=st.INK,
                         fontsize=st.FONT_SIZE - 1,
@@ -173,13 +176,17 @@ def fig_r5(ctx):
             n = sum(untagged.values())
             center = "%s\nuntagged\n(%.1f%%)" % (short(n), 100 * n / total_reads) \
                 if total_reads == total_reads else "%s\nuntagged" % short(n)
-            donut(ax, untagged, center, ctx.min_label)
+            donut(ax, untagged, center, ctx.min_label, ctx.min_slice)
             if i == 0:
                 ax.set_title(st.REFERENCE_LABEL[ref], pad=4)
         fig.text(0.02, top - (top - bottom) * (i + 0.5) / len(platforms), st.PLATFORM_LABEL[platform],
                  rotation=90, ha="center", va="center")
     handles = [Patch(facecolor=c, hatch=h, edgecolor="white", label=l) for _, l, c, h in CLASSES]
-    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.55, 0.0))
+    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.55, 0.02))
+    if ctx.min_slice > 0:
+        fig.text(0.55, 0.005, "Slices under %g%% are drawn at %g%% so they can be seen; the labels give the "
+                 "true numbers." % (100 * ctx.min_slice, 100 * ctx.min_slice), ha="center", va="bottom",
+                 color=st.MUTED, fontsize=st.FONT_SIZE - 1)
     fig.suptitle("Why reads stay untagged: %s, %s input, %dx, chr1-22" % (
         st.PHASER_LABEL[ctx.phaser], st.CALLER_LABEL.get(ctx.caller, ctx.caller), ctx.depth), y=0.99)
     return save(fig, ctx, "figR5_untagged_reasons_%s" % ctx.phaser)
@@ -556,6 +563,8 @@ def main():
     ap.add_argument("--ref", default="T2T", help="reference of R8")
     ap.add_argument("--metric", choices=["f1", "precision", "recall"], default="f1", help="R8")
     ap.add_argument("--min-label", type=float, default=0.0, help="R5: smallest slice with a label")
+    ap.add_argument("--min-slice", type=float, default=0.025,
+                    help="R5: smallest drawn slice, as a fraction of the ring (0: true sizes)")
     ap.add_argument("--top", type=int, default=7, help="R9: columns per group")
     ap.add_argument("--png", action="store_true")
     ctx = ap.parse_args()
