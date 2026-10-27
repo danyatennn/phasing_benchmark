@@ -117,7 +117,7 @@ def donut(ax, counts, center, min_label):
     vals = [(k, col, hatch, counts.get(k, 0)) for k, _, col, hatch in CLASSES if counts.get(k, 0) > 0]
     wedges, _ = ax.pie([v[3] for v in vals], radius=1.0, startangle=90, counterclock=False,
                        colors=[v[1] for v in vals],
-                       wedgeprops=dict(width=0.36, edgecolor="white", linewidth=0.8))
+                       wedgeprops=dict(width=0.3, edgecolor="white", linewidth=0.8))
     for w, v in zip(wedges, vals):
         if v[2]:
             w.set_hatch(v[2])
@@ -132,7 +132,7 @@ def donut(ax, counts, center, min_label):
         x, y = math.cos(ang), math.sin(ang)
         sides[1 if x >= 0 else -1].append((1.15 * y, x, y, "%s (%.1f%%)" % (short(v[3]), 100 * share)))
     for sign, labels in sides.items():
-        for ty, x, y, text in spread(labels, 0.27):
+        for ty, x, y, text in spread(labels, 0.3, low=-1.4, high=1.4):
             ax.annotate(text, xy=(1.01 * x, 1.01 * y), xytext=(sign * 1.3, ty),
                         ha="left" if sign > 0 else "right", va="center", color=st.INK,
                         fontsize=st.FONT_SIZE - 1,
@@ -171,7 +171,7 @@ def fig_r5(ctx):
             untagged = {k: counts.get(k, 0) for k, *_ in CLASSES}
             total_reads = counts.get("all", math.nan)
             n = sum(untagged.values())
-            center = "%s\nuntagged\n%.1f%% of reads" % (short(n), 100 * n / total_reads) \
+            center = "%s\nuntagged\n(%.1f%%)" % (short(n), 100 * n / total_reads) \
                 if total_reads == total_reads else "%s\nuntagged" % short(n)
             donut(ax, untagged, center, ctx.min_label)
             if i == 0:
@@ -315,11 +315,12 @@ def fig_r7(ctx):
                         linestyle="none", zorder=3)
             ax.set_xscale("log")
             ax.set_title(st.REFERENCE_LABEL[ref])
-            ax.set_xlabel("Switch error rate (%)")
+            ax.set_xlabel("Switch error rate (%, lower to the right)")
             ax.grid(color=st.GRID, linewidth=0.5)
             ax.set_axisbelow(True)
         lo, hi = min(xs), max(xs)
-        axes[0][0].set_xlim(lo / 1.6, hi * 1.6)
+        # reversed: fewer switches to the right, so the top right corner is best
+        axes[0][0].set_xlim(hi * 1.6, lo / 1.6)
         log_ticks(axes[0][0].xaxis, lo / 1.6, hi * 1.6)
         ylo, yhi = min(ys), max(ys)
         pad = 0.08 * (yhi - ylo or 1)
@@ -554,7 +555,7 @@ def main():
     ap.add_argument("--stratum", default="alldifficultregions", help="end point of R7")
     ap.add_argument("--ref", default="T2T", help="reference of R8")
     ap.add_argument("--metric", choices=["f1", "precision", "recall"], default="f1", help="R8")
-    ap.add_argument("--min-label", type=float, default=0.015, help="R5: smallest slice with a label")
+    ap.add_argument("--min-label", type=float, default=0.0, help="R5: smallest slice with a label")
     ap.add_argument("--top", type=int, default=7, help="R9: columns per group")
     ap.add_argument("--png", action="store_true")
     ctx = ap.parse_args()
