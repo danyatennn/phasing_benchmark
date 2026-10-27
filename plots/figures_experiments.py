@@ -62,9 +62,9 @@ INPUT_LABEL = {"truth": "GIAB truth SNPs", "truthindel": "SNPs + het indels",
                "truthall": "SNPs + all het variants"}
 
 ASSEMBLERS = ["hifiasm", "hifiasmtrio", "verkkotrio"]
-ASM_LABEL = {"hifiasm": "hifiasm, no parents", "hifiasmtrio": "hifiasm trio",
-             "verkkotrio": "Verkko trio"}
-ASM_COLOR = {"hifiasm": st.MUTED, "hifiasmtrio": st.INK, "verkkotrio": "#6D7F92"}
+ASM_LABEL = {"hifiasm": "hifiasm", "hifiasmtrio": "hifiasm trio", "verkkotrio": "Verkko trio"}
+# one sage family, light to dark, apart from the phasers' and platforms' hues
+ASM_COLOR = {"hifiasm": "#A9BC8F", "hifiasmtrio": "#5F8A5B", "verkkotrio": "#34573F"}
 
 PALE = 0.35          # the reference bar of a group: the same colour, lighter
 
@@ -256,7 +256,7 @@ def figB_metric(db, ctx, sample, ref, number, metric):
 
 def figC_metric(db, ctx, sample, ref, number, metric, depth, with_hifiasm):
     """A panel per platform with an assembly: the read-based phasers on the
-    truth input (their colours), then the assemblies (greys)."""
+    truth input (their colours), then the assemblies (a sage family)."""
     tag, ylabel, value, log = metric
     assemblers = ASSEMBLERS if with_hifiasm else ASSEMBLERS[1:]
 
@@ -268,19 +268,29 @@ def figC_metric(db, ctx, sample, ref, number, metric, depth, with_hifiasm):
                  if any(finite(val((ref, a, p, depth, "dipcall"))) for a in assemblers)]
     if not platforms:
         raise NoData("no assembly runs of %s at %dx on %s" % (sample, depth, ref))
-    fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 14)
+    fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 24)
     drawn = []
     for ax, platform in zip(axes, platforms):
         groups = [(st.PHASER_LABEL[p], (ref, "truth", platform, depth, p), st.PHASER_COLOR[p])
                   for p in phasers_on(platform)]
+        n_phasers = len(groups)
         groups += [(ASM_LABEL[a], (ref, a, platform, depth, "dipcall"), ASM_COLOR[a])
                    for a in assemblers if db.has((ref, a, platform, depth, "dipcall"))]
-        for x, (_, k, color) in enumerate(groups):
+        # the assemblies a little apart from the phasers, a dotted line between
+        xs = [i + (0.6 if i >= n_phasers else 0) for i in range(len(groups))]
+        # many bars: the values turned upright so neighbours do not overlap
+        label_width = 1.0 if len(groups) <= 5 else 0.4
+        for x, (_, k, color) in zip(xs, groups):
             v = val(k)
             if bar(ax, x, v, 1.0, color) is not None:
                 drawn.append(v)
-                label_bar(ax, x, v, 1.0)
-        group_ticks(ax, [label for label, _, _ in groups])
+                label_bar(ax, x, v, label_width)
+        if n_phasers < len(groups):
+            ax.axvline(n_phasers - 0.2, color=st.MUTED, linestyle=":", linewidth=0.6, zorder=1)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([label for label, _, _ in groups], rotation=60, ha="right",
+                           rotation_mode="anchor")
+        ax.set_xlim(xs[0] - 0.6, xs[-1] + 0.6)
         ax.set_title(st.PLATFORM_LABEL[platform])
     if not drawn:
         plt.close(fig)
