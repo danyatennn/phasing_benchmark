@@ -107,7 +107,7 @@ def legend_patches(items):
                   label=label) for label, alpha, hatch in items]
 
 
-def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, note=None):
+def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, note=None, show_change=True):
     """A panel per platform, a group per phaser; bars_of(platform, phaser) ->
     [(key, alpha, hatch)], the first the reference the others are compared with."""
     tag, ylabel, value, log = metric
@@ -125,7 +125,7 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, note=
                     continue
                 drawn.append(v)
                 # the value, and on a compared bar its change against the first
-                change = change_text(v, values[0]) if i else ""
+                change = change_text(v, values[0]) if i and show_change else ""
                 label_bar(ax, x + dx, v, w, value_text(v) + ("  " + change if change else ""))
         group_ticks(ax, [st.PHASER_LABEL[p] for p in phasers])
         ax.set_title(st.PLATFORM_LABEL[platform])
@@ -149,9 +149,12 @@ def figA_metric(db, ctx, sample, ref, number, metric, extra):
     bars_of = lambda p, ph: [(k, PALE if k[1] == "truth" else 1.0, hatch.get(k[1]))
                              for k in keys(p, ph)]
     legend = [(INPUT_LABEL["truth"], PALE, None)] + [(INPUT_LABEL[c], 1.0, hatch[c]) for c in extra]
+    # A1-A3: the values alone, without the change against the SNP input
+    show_change = number > 3
     return compare_groups(db, ctx, fig_name("figA%d_%s" % (number, metric[0]), sample, ref), ref,
                           metric, platforms, bars_of, legend,
-                          "over the bars: value, and the change against the SNP input")
+                          "over the bars: value, and the change against the SNP input" if show_change
+                          else "over the bars: value", show_change=show_change)
 
 
 def variants_table(root, sample):
