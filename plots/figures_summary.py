@@ -34,7 +34,9 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.colors import LinearSegmentedColormap, LogNorm
 from matplotlib.patches import Patch
+import matplotlib.colors as matplotlib_colors
 
 import style as st
 from data import sample_root
@@ -920,9 +922,273 @@ def fig_r14(ctx):
     return ", ".join(made)
 
 
+# --------------------------- R15: read accuracy, grid of input x phaser
+
+def fig_r15(ctx):
+    """Read-level haplotag accuracy with every block oriented by its SNPs
+    (readacc_run.sh, chr1-22, blocks of >= 2 SNPs): precision = reads on the
+    truth's haplotype / reads tagged by both, recall = the same / reads the
+    truth tags. Rows: platform x input, columns: phasers; a PDF per metric and
+    reference."""
+    rows = [r for r in table(path_of(ctx, "metrics", "summary_readacc_auto_min2.tsv"))
+            if int(float(r.get("depth", 0))) == ctx.depth]
+    if not rows:
+        raise NoData("no %dx rows in metrics/summary_readacc_auto_min2.tsv - run readacc_run.sh" % ctx.depth)
+    val = {}
+    for r in rows:
+        k = (r["reference"], r["caller"], r["platform"], r["phaser"])
+        val[("precision",) + k] = 100 * num(r["read_precision"])
+        val[("recall",) + k] = 100 * num(r["read_recall"])
+    inputs = [c for c in st.CALLERS if any(k[2] == c for k in val)]
+    made = []
+    for metric, label in (("precision", "Read haplotag precision (%)"), ("recall", "Read haplotag recall (%)")):
+        for ref in st.REFERENCES:
+            keys = [k for k in val if k[0] == metric and k[1] == ref]
+            if not keys:
+                continue
+            platforms = [p for p in st.PLATFORMS if any(k[3] == p for k in keys)]
+            phasers = [p for p in st.PHASERS if any(k[4] == p for k in keys)]
+            line = [(p, c) for p in platforms for c in inputs]
+            matrix = [[val.get((metric, ref, c, p, ph), math.nan) for ph in phasers] for p, c in line]
+            shown = [v for row in matrix for v in row if v == v]
+            if not shown:
+                continue
+            fig, ax = plt.subplots(figsize=(110 * st.MM, (30 + 5.2 * len(line)) * st.MM),
+                                   constrained_layout=True)
+            im = heatmap(ax, matrix, [st.CALLER_LABEL[c] for _, c in line],
+                         [st.PHASER_LABEL[ph] for ph in phasers],
+                         [(PLATFORM_TWO_LINES[p], len(inputs)) for p in platforms],
+                         [("", len(phasers))], label=lambda v: "%.2f" % v, cmap=st.SEQUENTIAL,
+                         vmin=min(shown), vmax=max(shown))
+            plt.setp(ax.get_xticklabels(), rotation=30, ha="right", rotation_mode="anchor")
+            colorbar(fig, im, ax, label)
+            fig.suptitle("%s, %s, %dx, blocks oriented by their SNPs" % (
+                label.replace(" (%)", ""), st.REFERENCE_LABEL[ref], ctx.depth))
+            made.append(save(fig, ctx, "figR15_read_%s_%dx_%s" % (metric, ctx.depth, ref)))
+    if not made:
+        raise NoData("nothing to draw")
+    return ", ".join(made)
+
+
+# ------------- R16: reads on the wrong haplotype per region, every input
+
+ENRICH = LinearSegmentedColormap.from_list("enrich", ["#2E6F9E", "#F7F7F7", "#B5523B"])
+MIN_WRONG = 10
+
+
+def fig_r16(ctx):
+    """Tagged reads on the wrong haplotype (1 - precision, blocks oriented by
+    their SNPs, bin/read_classes.sh) per tier-1 region, for every phaser input:
+    the truth and each caller. Rows: platform x phaser, columns: regions (a
+    read is in a region if half its alignment or more lies there).
+      figR16_wrong_<input>_<ref>   the percentage
+      figR16_ratio_<input>         T2T-CHM13 / GRCh38; a cell with fewer than
+                                   MIN_WRONG wrong reads on either reference is
+                                   left out (a ratio of a few reads says nothing)"""
+    rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+            if r.get("depth") == str(ctx.depth) and r.get("group_type") == "class"
+            and r.get("group") == "tagged"]
+    if not rows:
+        raise NoData("no tagged-read rows at %dx in summary_classes.tsv" % ctx.depth)
+    data = {}
+    for r in rows:
+        comp, corr = num(r["compared"]), num(r["correct"])
+        data[(r["reference"], r["caller"], r["platform"], r["phaser"], r["stratum"])] = (comp, corr)
+    order = ["genome"] + [s_ for s_, _ in STRATA_R10]
+    strata = [s_ for s_ in order if any(k[4] == s_ for k in data)]
+    labels = ["Whole genome\n(chr1-22)" if s_ == "genome" else stratum_label(s_) for s_ in strata]
+    inputs = [c for c in st.CALLERS if any(k[1] == c for k in data)]
+
+    def wrong(ref, c, p, ph, s_):
+        v = data.get((ref, c, p, ph, s_))
+        return 100 * (1 - v[1] / v[0]) if v and v[0] else math.nan
+
+    def rows_of(c):
+        return [(p, ph) for p in st.PLATFORMS for ph in st.PHASERS
+                if any(k[1] == c and k[2] == p and k[3] == ph for k in data)]
+
+    def draw(name, line, matrix, bar_label, title, **image):
+        fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * st.MM, (34 + 5 * len(line)) * st.MM),
+                               constrained_layout=True)
+        groups = [(PLATFORM_TWO_LINES[p], sum(1 for q, _ in line if q == p))
+                  for p in st.PLATFORMS if any(q == p for q, _ in line)]
+        im = heatmap(ax, matrix, [st.PHASER_LABEL[ph] for _, ph in line], labels, groups,
+                     [("", len(strata))], label=lambda v: "%.2f" % v, **image)
+        plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
+        bar = colorbar(fig, im, ax, bar_label)
+        if "norm" in image:
+            # a ratio: a few plain ticks on both sides of 1
+            lo, hi = image["norm"].vmin, image["norm"].vmax
+            ticks = [t for t in (0.1, 0.2, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3, 5, 10) if lo <= t <= hi]
+            bar.set_ticks(ticks)
+            bar.set_ticklabels(["%g" % t for t in ticks])
+        fig.suptitle(title)
+        return save(fig, ctx, name)
+
+    made = []
+    # the percentage, one colour scale over every input of a reference
+    for ref in st.REFERENCES:
+        shown = [wrong(ref, c, p, ph, s_) for c in inputs for p, ph in rows_of(c) for s_ in strata]
+        shown = [v for v in shown if v == v]
+        if not shown:
+            continue
+        for c in inputs:
+            line = rows_of(c)
+            matrix = [[wrong(ref, c, p, ph, s_) for s_ in strata] for p, ph in line]
+            if not any(v == v for row in matrix for v in row):
+                continue
+            made.append(draw("figR16_wrong_%s_%s" % (c, ref), line, matrix,
+                             "Tagged reads on the wrong haplotype (%%), %d×" % ctx.depth,
+                             "%s input, %s: tagged reads on the wrong haplotype" % (
+                                 st.CALLER_LABEL[c], st.REFERENCE_LABEL[ref]),
+                             cmap=st.SEQUENTIAL, vmin=min(shown), vmax=max(shown)))
+    # T2T over GRCh38
+    for c in inputs:
+        line = rows_of(c)
+        matrix = []
+        for p, ph in line:
+            row = []
+            for s_ in strata:
+                a, b = data.get(("T2T", c, p, ph, s_)), data.get(("GRCh38", c, p, ph, s_))
+                ok = a and b and a[0] - a[1] >= MIN_WRONG and b[0] - b[1] >= MIN_WRONG
+                ra, rb = wrong("T2T", c, p, ph, s_), wrong("GRCh38", c, p, ph, s_)
+                row.append(ra / rb if ok and rb else math.nan)
+            matrix.append(row)
+        shown = [v for r_ in matrix for v in r_ if v == v and v > 0]
+        if not shown:
+            continue
+        span = max(abs(math.log10(v)) for v in shown) or 1
+        made.append(draw("figR16_ratio_%s" % c, line, matrix,
+                         "Tagged reads on the wrong haplotype,\nT2T-CHM13 / GRCh38, %d×" % ctx.depth,
+                         "%s input: T2T-CHM13 against GRCh38 (blank: under %d wrong reads)" % (
+                             st.CALLER_LABEL[c], MIN_WRONG),
+                         cmap=ENRICH, norm=LogNorm(vmin=10 ** -span, vmax=10 ** span)))
+    if not made:
+        raise NoData("nothing to draw")
+    return ", ".join(made)
+
+
+
+# ------------------- R17: callers per region, precision / recall / F1
+
+R17_METRICS = [("precision", "Precision", 0.45), ("recall", "Recall", 0.7), ("f1", "F1 score", 1.0)]
+
+
+def tint(color, f):
+    """color mixed with white: f = 1 the colour itself, smaller is lighter"""
+    rgb = matplotlib_colors.to_rgb(color)
+    return tuple(1 - f * (1 - c) for c in rgb)
+
+
+def fig_r17(ctx):
+    """Het SNP calls of each caller per genomic region, at one coverage: a
+    panel per region, three bars per caller - precision, recall, F1 - in light
+    to full shades of the caller's colour, the values written in the bars
+    (metrics_strata_auto/summary_calls_strata.tsv). A PDF per platform and
+    reference; the y axis is shared and zoomed, the break marks it."""
+    rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_calls_strata.tsv"))
+            if int(float(r.get("depth", 0))) == ctx.depth]
+    if not rows:
+        raise NoData("no %dx rows in summary_calls_strata.tsv" % ctx.depth)
+    val = {}
+    for r in rows:
+        for m, _, _ in R17_METRICS:
+            val[(r["reference"], r["platform"], r["caller"], r["stratum"], m)] = num(r[m])
+    made = []
+    # one PDF per reference, then one with T2T as bars and GRCh38 as a tick on
+    # each bar (other = the reference drawn as ticks)
+    views = [(ref, None) for ref in st.REFERENCES] + [("T2T", "GRCh38")]
+    for ref, other in views:
+        for platform in st.PLATFORMS:
+            keys = [k for k in val if k[0] == ref and k[1] == platform and val[k] == val[k]]
+            if not keys:
+                continue
+            if other:
+                okeys = [k for k in val if k[0] == other and k[1] == platform and val[k] == val[k]]
+                if not okeys:
+                    continue
+                keys += okeys
+            callers = [c for c in st.CALLERS if c != "truth" and any(k[2] == c for k in keys)]
+            strata = [(s_, l) for s_, l in STRATA_R8 if any(k[3] == s_ for k in keys)]
+            lo, hi = zoomed([val[k] for k in keys], lo_cap=0, hi_cap=1)
+            lo = math.floor(lo * 50) / 50
+            hi = 1.0
+            ncols = 6
+            nrows = math.ceil(len(strata) / ncols)
+            fig, axes = plt.subplots(nrows, ncols, squeeze=False, sharey=True,
+                                     figsize=(st.FULL_WIDTH * st.MM, (30 + 50 * nrows) * st.MM),
+                                     layout="constrained")
+            nbar = len(R17_METRICS)
+            width = 0.9 / nbar
+            for n, (s_, label) in enumerate(strata):
+                ax = axes[n // ncols][n % ncols]
+                for ci, c in enumerate(callers):
+                    for mi, (m, mlabel, f) in enumerate(R17_METRICS):
+                        y = val.get((ref, platform, c, s_, m), math.nan)
+                        if y != y:
+                            continue
+                        x = ci + (mi - (nbar - 1) / 2) * width
+                        color = tint(st.CALLER_COLOR[c], f)
+                        ax.bar(x, y - lo, bottom=lo, width=width * 0.94, color=color, linewidth=0, zorder=2)
+                        # the metric written up from the foot of the bar, where it
+                        # clears both the value at the top and the GRCh38 line: left
+                        # out of a bar too short for it
+                        # the height the word takes, about 2.7% of the axis per letter
+                        room = lo + (0.015 + 0.027 * len(mlabel)) * (hi - lo)
+                        g = val.get((other, platform, c, s_, m), math.nan) if other else math.nan
+                        if y > room + 0.01 * (hi - lo) and not (g == g and g < room + 0.01 * (hi - lo)):
+                            ax.text(x, lo + 0.012 * (hi - lo), mlabel, rotation=90, ha="center", va="bottom",
+                                    fontsize=st.FONT_SIZE - 2.5, zorder=3,
+                                    color="white" if f > 0.6 and c != "longcalld" else st.INK)
+                        # the value inside a tall bar, over a short one; not on the
+                        # comparison, where the GRCh38 lines would cross it
+                        if other:
+                            g = val.get((other, platform, c, s_, m), math.nan)
+                            if g == g:
+                                ax.plot([x - width * 0.47, x + width * 0.47], [g, g], color=st.INK,
+                                        linewidth=1.3, solid_capstyle="butt", zorder=4)
+                            continue
+                        inside = y - lo > 0.3 * (hi - lo)
+                        dark = inside and f > 0.6 and c != "longcalld"
+                        ax.text(x, y - 0.01 * (hi - lo) if inside else y + 0.01 * (hi - lo), "%.3f" % y,
+                                rotation=90, ha="center", va="top" if inside else "bottom",
+                                fontsize=st.FONT_SIZE - 2.5, color="white" if dark else st.INK, zorder=3)
+                ax.set_ylim(lo, hi)
+                ax.set_xlim(-0.55, len(callers) - 0.45)
+                ax.set_xticks(range(len(callers)))
+                ax.set_xticklabels([st.CALLER_LABEL[c] for c in callers], rotation=30, ha="right",
+                                   rotation_mode="anchor", fontsize=st.FONT_SIZE - 1)
+                ax.set_title(label.replace("\n", " ").replace("Imperfect homopol", "Imp. homopol"),
+                             fontsize=st.FONT_SIZE)
+                y_grid(ax)
+                if n % ncols == 0:
+                    ax.set_ylabel("Value")
+                    if lo > 0:
+                        axis_break(ax)
+            for n in range(len(strata), nrows * ncols):
+                axes[n // ncols][n % ncols].axis("off")
+            # callers by colour, the metric by shade (grey key)
+            handles = [Patch(color=st.CALLER_COLOR[c], label=st.CALLER_LABEL[c]) for c in callers]
+            handles += [Patch(color=tint(st.MUTED, f), label=ml) for _, ml, f in R17_METRICS]
+            if other:
+                handles = [Patch(color=st.MUTED, label="%s (bars)" % st.REFERENCE_LABEL[ref]),
+                           Line2D([], [], color=st.INK, linewidth=1.3, label="%s (line)" %
+                                  st.REFERENCE_LABEL[other])] + handles
+            fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
+            title = st.REFERENCE_LABEL[ref] if not other else "%s against %s" % (
+                st.REFERENCE_LABEL[ref], st.REFERENCE_LABEL[other])
+            fig.suptitle("Het SNP calls across genomic regions: %s, %s, %dx" % (
+                st.PLATFORM_LABEL[platform], title, ctx.depth))
+            tag = ref if not other else "%s_vs_%s" % (ref, other)
+            made.append(save(fig, ctx, "figR17_callers_prf_%s_%dx_%s" % (platform, ctx.depth, tag)))
+    if not made:
+        raise NoData("nothing to draw")
+    return ", ".join(made)
+
 FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10),
            ("R11", fig_r11), ("R12", fig_r12), ("R13", fig_r13),
-           ("R14", fig_r14)]
+           ("R14", fig_r14), ("R15", fig_r15), ("R16", fig_r16),
+           ("R17", fig_r17)]
 
 
 def main():
