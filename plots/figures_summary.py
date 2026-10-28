@@ -1191,6 +1191,7 @@ def fig_r17(ctx):
 R18_METRICS = [
     ("n50", "Block N50 in the region (Mb)", False),
     ("accuracy", "Haplotag accuracy (%)", True),
+    ("recall", "Haplotag recall (%)", True),
 ]
 
 
@@ -1231,6 +1232,13 @@ def r18_draw(ctx, by):
             if comp:
                 val[("accuracy", r["reference"], r["platform"], x, r["stratum"])] = \
                     100 * num(r["correct"]) / comp
+    # reads on their truth haplotype / reads the truth tags (bin/read_recall_strata.sh)
+    for r in table(path_of(ctx, "metrics_reads", "summary_recall_strata.tsv")):
+        x = series(r)
+        if x and r.get("depth") == str(ctx.depth):
+            tt = num(r["truth_tagged"])
+            if tt:
+                val[("recall", r["reference"], r["platform"], x, r["stratum"])] = 100 * num(r["correct"]) / tt
     if by == "phaser":
         order, color, names = st.PHASERS, st.PHASER_COLOR, st.PHASER_LABEL
         applies = lambda p, x: st.applies(p, x)
@@ -1244,7 +1252,8 @@ def r18_draw(ctx, by):
     made = []
     for metric, label, zoom in R18_METRICS:
         keys = [k for k in val if k[0] == metric and val[k] == val[k]]
-        strata = [(s_, l) for s_, l in STRATA_R10 if any(k[4] == s_ for k in keys)]
+        strata = [(s_, l) for s_, l in [("genome", "Whole genome (chr1-22)")] + STRATA_R10
+                  if any(k[4] == s_ for k in keys)]
         if not strata:
             continue
         platforms = [p for p in st.PLATFORMS if any(k[2] == p for k in keys)]
