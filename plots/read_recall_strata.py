@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
-"""Read-level haplotag recall per genomic region, for every run of one cell.
+"""Read-level haplotag recall per genomic region, for every run of one cell,
+counted in reads and in read bases.
 
   recall    = reads on their truth haplotype / reads the truth tags
   precision = reads on their truth haplotype / reads tagged by both
+  recall_bases = the same as recall, each read weighted by its length
 
 Reads: primary alignments on chr1-22 (the cell's read table) that whatshap
-haplotag puts on H1/H2 with the phased truth (<cell>_truthtags.tsv) - the
-denominator of recall. Of those, a read is right if the run tags it H1/H2 in a
-block of --min-snps phased het SNPs or more, the block shares SNPs with the
-truth (which orient it, majority of them), and so oriented its label is the
-truth's - the rules of readacc_run.sh, whose genome-wide read_recall this
-reproduces. A read is in a region if half its alignment or more lies there;
-"genome" is every read.
+haplotag puts on H1/H2 with the phased truth (<cell>_truthtags.tsv) and that
+cover --min-read-snps truth het SNPs or more with REF or ALT (the truth allele
+matrix, reads/<cell>_truth.reads.tsv.gz: n_ref + n_alt) - the denominator of
+recall, the same for every run of the cell. Of those, a read is right if the
+run tags it H1/H2 in a block of --min-snps phased het SNPs or more, the block
+shares SNPs with the truth (which orient it, majority of them), and so oriented
+its label is the truth's - the rules of readacc_run.sh. A read is in a region
+if half its alignment or more lies there; "genome" is every read. Bases: the
+whole read (column length of the read table), as plots/tagged_bases.py.
 
 One line per run x region (metrics_reads/<run>.recall_strata.tsv):
   reference sample caller platform depth phaser stratum truth_tagged
   tagged compared correct unoriented recall precision
+  truth_bases tagged_bases compared_bases correct_bases recall_bases
     tagged      of the truth-tagged reads, those the run tags (blocks >= min)
     compared    of those, in a block the truth orients
     unoriented  tagged, in a block that shares no SNP with the truth
 
   python plots/read_recall_strata.py --reads-table <cell>.reads.tsv.gz \\
-      --truth-tags <cell>_truthtags.tsv --truth-vcf truth.phased.vcf.gz \\
-      --stratum segdups=prepared_auto/GRCh38_segdups.bed ... --min-snps 2 --jobs runs.tsv
+      --truth-alleles reads/<cell>_truth.reads.tsv.gz --truth-tags <cell>_truthtags.tsv \\
+      --truth-vcf truth.phased.vcf.gz --stratum segdups=prepared_auto/GRCh38_segdups.bed ... \\
+      --min-snps 2 --min-read-snps 2 --jobs runs.tsv
 runs.tsv: reference sample caller platform depth phaser tags vcf out
 """
 
@@ -38,43 +44,61 @@ from read_classes import blocks_and_orientation
 
 STRATUM_FRACTION = 0.5
 COLUMNS = ["reference", "sample", "caller", "platform", "depth", "phaser", "stratum", "truth_tagged",
-           "tagged", "compared", "correct", "unoriented", "recall", "precision"]
+           "tagged", "compared", "correct", "unoriented", "recall", "precision",
+           "truth_bases", "tagged_bases", "compared_bases", "correct_bases", "recall_bases"]
+
+
+def snps_per_read(path):
+    """read -> truth het SNPs it covers with REF or ALT"""
+    out = {}
+    with open_text(path) as fh:
+        h = fh.readline().rstrip("\n").split("\t")
+        i_ref, i_alt = h.index("n_ref"), h.index("n_alt")
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            out[f[0]] = int(f[i_ref]) + int(f[i_alt])
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--reads-table", required=True)
+    ap.add_argument("--truth-alleles", required=True, help="reads/<cell>_truth.reads.tsv.gz")
     ap.add_argument("--truth-tags", required=True)
     ap.add_argument("--truth-vcf", required=True)
     ap.add_argument("--stratum", action="append", default=[], help="name=bed, repeatable")
-    ap.add_argument("--min-snps", type=int, default=2)
+    ap.add_argument("--min-snps", type=int, default=2, help="phased het SNPs of the run's block")
+    ap.add_argument("--min-read-snps", type=int, default=2, help="truth het SNPs on the read")
     ap.add_argument("--jobs", required=True)
     args = ap.parse_args()
 
     truth = truth_labels(args.truth_tags, "truthtags", autosomes_only=True)
+    snps = snps_per_read(args.truth_alleles)
     strata = []
     for item in args.stratum:
         name, _, path = item.partition("=")
         if os.path.exists(path):
             strata.append((name, IntervalSet.from_bed(path, autosomes_only=True)))
-    # the regions of every truth-tagged read, from its primary alignment
-    region_of = {}
+    # the regions and length of every truth-tagged read with enough truth SNPs,
+    # from its primary alignment; a read missing from the read table or the
+    # allele matrix is left out
+    region_of, length_of = {}, {}
     with open_text(args.reads_table) as fh:
         h = fh.readline().rstrip("\n").split("\t")
-        ic, i_s, ie = h.index("chrom"), h.index("start"), h.index("end")
+        ic, i_s, ie, il = h.index("chrom"), h.index("start"), h.index("end"), h.index("length")
         for line in fh:
             f = line.rstrip("\n").split("\t")
-            if f[0] not in truth or not is_autosome(f[ic]):
+            r = f[0]
+            if r not in truth or not is_autosome(f[ic]) or snps.get(r, 0) < args.min_read_snps:
                 continue
             c, s, e = f[ic], int(f[i_s]), int(f[ie])
             span = max(1, e - s)
-            region_of[f[0]] = ("genome",) + tuple(
+            region_of[r] = ("genome",) + tuple(
                 n for n, iv in strata if iv.overlap(c, s, e) >= STRATUM_FRACTION * span)
-    # a truth-tagged read missing from the read table (not a primary alignment
-    # on chr1-22 there) still counts genome-wide, as in readacc_run.sh
-    for r in truth:
-        region_of.setdefault(r, ("genome",))
-    print("%s: %d truth-tagged reads on chr1-22" % (args.reads_table, len(truth)), file=sys.stderr)
+            length_of[r] = int(f[il])
+    print("%s: %d truth-tagged reads on chr1-22, %d with >= %d truth het SNPs"
+          % (args.reads_table, len(truth), len(region_of), args.min_read_snps), file=sys.stderr)
+    del snps
 
     truth_gt = {(c, p, ref, alt): gt for c, p, ref, alt, gt, ps in
                 vcf_records(args.truth_vcf, autosomes_only=True) if phased_het(gt) is not None}
@@ -85,11 +109,12 @@ def main():
         labels, (tags_path, vcf, out) = job[:6], job[6:9]
         size, flip = blocks_and_orientation(vcf, truth_gt)
         tags = haplotag_list(tags_path, autosomes_only=True)
-        acc = {n: [0, 0, 0, 0, 0] for n in order}     # truth_tagged tagged compared correct unoriented
-        for r, lab in truth.items():
-            regions = region_of[r]
+        # reads: truth_tagged tagged compared correct unoriented, then the same in bases
+        acc = {n: [0] * 10 for n in order}
+        for r, regions in region_of.items():
+            lab, ln = truth[r], length_of[r]
             t = tags.get(r)
-            tagged = t is not None and t[0] in ("H1", "H2") and size.get((t[2], t[1]), 0) >= args.min_snps
+            tagged = int(t is not None and t[0] in ("H1", "H2") and size.get((t[2], t[1]), 0) >= args.min_snps)
             comp = corr = unor = 0
             if tagged:
                 f = flip.get((t[2], t[1]))
@@ -105,20 +130,27 @@ def main():
                 a[2] += comp
                 a[3] += corr
                 a[4] += unor
+                a[5] += ln
+                a[6] += tagged * ln
+                a[7] += comp * ln
+                a[8] += corr * ln
         lines = []
         for n in order:
-            tt, tg, cp, cr, un = acc[n]
+            tt, tg, cp, cr, un, tb, gb, cb, rb, _ = acc[n]
             if not tt:
                 continue
             lines.append("\t".join(labels + [n, str(tt), str(tg), str(cp), str(cr), str(un),
-                                             "%.6f" % (cr / tt), "%.6f" % (cr / cp if cp else 0)]) + "\n")
+                                             "%.6f" % (cr / tt), "%.6f" % (cr / cp if cp else 0),
+                                             str(tb), str(gb), str(cb), str(rb),
+                                             "%.6f" % (rb / tb if tb else 0)]) + "\n")
         tmp = "%s.%d.tmp" % (out, os.getpid())
         with open(tmp, "w") as fh:
             fh.write("\t".join(COLUMNS) + "\n")
             fh.writelines(lines)
         os.replace(tmp, out)
         g = acc["genome"]
-        print("  %s: genome recall %.4f (%d of %d)" % (labels[5], g[3] / g[0] if g[0] else 0, g[3], g[0]),
+        print("  %s: genome recall %.4f (%d of %d reads), by bases %.4f"
+              % (labels[5], g[3] / g[0] if g[0] else 0, g[3], g[0], g[8] / g[5] if g[5] else 0),
               file=sys.stderr)
 
 

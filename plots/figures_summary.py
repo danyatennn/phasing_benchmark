@@ -1192,6 +1192,7 @@ R18_METRICS = [
     ("n50", "Block N50 in the region (Mb)", False),
     ("accuracy", "Haplotag accuracy (%)", True),
     ("recall", "Haplotag recall (%)", True),
+    ("recall_bases", "Haplotag recall, bases (%)", True),
 ]
 
 
@@ -1212,7 +1213,9 @@ def r18_draw(ctx, by):
     (summary_phase_strata.tsv, block_n50 of whatshap stats on the run's VCF
     cut to the region); haplotag accuracy = tagged reads on the truth's
     haplotype / tagged reads with a truth label, blocks oriented by their SNPs
-    (summary_classes.tsv, class tagged). A PDF per metric."""
+    (summary_classes.tsv, class tagged); haplotag recall = reads on the truth's
+    haplotype / reads the truth tags with 2 truth het SNPs or more, by reads and
+    by read bases (summary_recall_strata.tsv). A PDF per metric."""
     # the series a bar stands for: a phaser (input fixed) or an input (phaser fixed)
     def series(r):
         if by == "phaser":
@@ -1232,13 +1235,17 @@ def r18_draw(ctx, by):
             if comp:
                 val[("accuracy", r["reference"], r["platform"], x, r["stratum"])] = \
                     100 * num(r["correct"]) / comp
-    # reads on their truth haplotype / reads the truth tags (bin/read_recall_strata.sh)
+    # reads on their truth haplotype / reads the truth tags, of the reads with
+    # 2 truth het SNPs or more, by reads and by read bases (bin/read_recall_strata.sh)
     for r in table(path_of(ctx, "metrics_reads", "summary_recall_strata.tsv")):
         x = series(r)
         if x and r.get("depth") == str(ctx.depth):
-            tt = num(r["truth_tagged"])
+            k = (r["reference"], r["platform"], x, r["stratum"])
+            tt, tb = num(r["truth_tagged"]), num(r.get("truth_bases"))
             if tt:
-                val[("recall", r["reference"], r["platform"], x, r["stratum"])] = 100 * num(r["correct"]) / tt
+                val[("recall",) + k] = 100 * num(r["correct"]) / tt
+            if tb == tb and tb:
+                val[("recall_bases",) + k] = 100 * num(r["correct_bases"]) / tb
     if by == "phaser":
         order, color, names = st.PHASERS, st.PHASER_COLOR, st.PHASER_LABEL
         applies = lambda p, x: st.applies(p, x)
