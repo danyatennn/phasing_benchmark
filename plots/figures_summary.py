@@ -1185,10 +1185,119 @@ def fig_r17(ctx):
         raise NoData("nothing to draw")
     return ", ".join(made)
 
+
+# ---------------- R18: NG50 and haplotag accuracy, T2T against GRCh38
+
+R18_METRICS = [
+    ("n50", "Block N50 in the region (Mb)", False),
+    ("accuracy", "Haplotag accuracy (%)", True),
+]
+
+
+def fig_r18(ctx):
+    """Two sets of PDFs: a bar per phaser on the input --caller, and a bar per
+    input (the truth and each caller) for the phaser --phaser."""
+    out = [r18_draw(ctx, "phaser"), r18_draw(ctx, "input")]
+    out = [o for o in out if o]
+    if not out:
+        raise NoData("no %dx rows for NG50 or haplotag accuracy" % ctx.depth)
+    return ", ".join(out)
+
+
+def r18_draw(ctx, by):
+    """T2T-CHM13 (bars) against GRCh38 (a black line on each bar) per tier-1
+    region, the input --caller, 30x: a panel per region, a group per platform,
+    a bar per phaser. N50 of the phase blocks inside the region
+    (summary_phase_strata.tsv, block_n50 of whatshap stats on the run's VCF
+    cut to the region); haplotag accuracy = tagged reads on the truth's
+    haplotype / tagged reads with a truth label, blocks oriented by their SNPs
+    (summary_classes.tsv, class tagged). A PDF per metric."""
+    # the series a bar stands for: a phaser (input fixed) or an input (phaser fixed)
+    def series(r):
+        if by == "phaser":
+            return r["phaser"] if r.get("caller") == ctx.caller else None
+        return r["caller"] if r.get("phaser") == ctx.phaser else None
+
+    val = {}
+    for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv")):
+        x = series(r)
+        if x and int(float(r.get("depth", 0))) == ctx.depth:
+            val[("n50", r["reference"], r["platform"], x, r["stratum"])] = num(r["block_n50"]) / 1e6
+    for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv")):
+        x = series(r)
+        if (x and r.get("depth") == str(ctx.depth)
+                and r.get("group_type") == "class" and r.get("group") == "tagged"):
+            comp = num(r["compared"])
+            if comp:
+                val[("accuracy", r["reference"], r["platform"], x, r["stratum"])] = \
+                    100 * num(r["correct"]) / comp
+    if by == "phaser":
+        order, color, names = st.PHASERS, st.PHASER_COLOR, st.PHASER_LABEL
+        applies = lambda p, x: st.applies(p, x)
+        fixed = "%s input" % st.CALLER_LABEL.get(ctx.caller, ctx.caller)
+        tag = ctx.caller
+    else:
+        order, color, names = st.CALLERS, st.CALLER_COLOR, st.CALLER_LABEL
+        applies = lambda p, x: True
+        fixed = st.PHASER_LABEL[ctx.phaser]
+        tag = "inputs_%s" % ctx.phaser
+    made = []
+    for metric, label, zoom in R18_METRICS:
+        keys = [k for k in val if k[0] == metric and val[k] == val[k]]
+        strata = [(s_, l) for s_, l in STRATA_R10 if any(k[4] == s_ for k in keys)]
+        if not strata:
+            continue
+        platforms = [p for p in st.PLATFORMS if any(k[2] == p for k in keys)]
+        phasers = [ph for ph in order if any(k[3] == ph for k in keys)]
+        ncols = min(4, len(strata))
+        nrows = math.ceil(len(strata) / ncols)
+        fig, axes = plt.subplots(nrows, ncols, squeeze=False,
+                                 figsize=(st.FULL_WIDTH * st.MM, (26 + 52 * nrows) * st.MM),
+                                 layout="constrained")
+        width = 0.84 / len(phasers)
+        for n, (s_, slabel) in enumerate(strata):
+            ax = axes[n // ncols][n % ncols]
+            shown = [val[k] for k in keys if k[4] == s_]
+            lo, hi = zoomed(shown, lo_cap=0, hi_cap=100) if zoom else (0, max(shown) * 1.12)
+            for pi, p in enumerate(platforms):
+                for j, ph in enumerate(phasers):
+                    if not applies(p, ph):
+                        continue
+                    t = val.get((metric, "T2T", p, ph, s_), math.nan)
+                    g = val.get((metric, "GRCh38", p, ph, s_), math.nan)
+                    x = pi + (j - (len(phasers) - 1) / 2) * width
+                    if t == t:
+                        ax.bar(x, t - lo, bottom=lo, width=width * 0.9, color=color[ph],
+                               linewidth=0, zorder=2)
+                    if g == g:
+                        ax.plot([x - width * 0.45, x + width * 0.45], [g, g], color=st.INK, linewidth=1.3,
+                                solid_capstyle="butt", zorder=4)
+            ax.set_ylim(lo, hi)
+            if lo > 0:
+                axis_break(ax)
+            ax.set_xticks(range(len(platforms)))
+            ax.set_xticklabels([PLATFORM_TWO_LINES[p] for p in platforms], fontsize=st.FONT_SIZE - 1)
+            ax.set_xlim(-0.55, len(platforms) - 0.45)
+            ax.set_title(slabel.replace("\n", " "))
+            y_grid(ax)
+            if n % ncols == 0:
+                ax.set_ylabel(label)
+        for n in range(len(strata), nrows * ncols):
+            axes[n // ncols][n % ncols].axis("off")
+        handles = [Patch(color=color[ph], label=names[ph]) for ph in phasers]
+        # an outline, so the reference key is not read as the grey of the truth input
+        handles += [Patch(facecolor="white", edgecolor=st.INK, linewidth=0.8, label="T2T-CHM13 (bars)"),
+                    Line2D([], [], color=st.INK, linewidth=1.3, label="GRCh38 (line)")]
+        fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
+        fig.suptitle("%s: T2T-CHM13 against GRCh38, %s, %dx" % (
+            label.replace(" (%)", "").replace(" (Mb)", ""), fixed, ctx.depth))
+        made.append(save(fig, ctx, "figR18_refs_%s_%s_%dx" % (metric, tag, ctx.depth)))
+    return ", ".join(made)
+
 FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10),
            ("R11", fig_r11), ("R12", fig_r12), ("R13", fig_r13),
            ("R14", fig_r14), ("R15", fig_r15), ("R16", fig_r16),
-           ("R17", fig_r17)]
+           ("R17", fig_r17), ("R18", fig_r18)]
 
 
 def main():
