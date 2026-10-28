@@ -87,6 +87,27 @@ def path_of(ctx, *parts):
     return os.path.join(sample_root(ctx.root, ctx.sample), *parts)
 
 
+# --read-truth matpat / yak: R15, R16 and R18 from bin/read_recall_strata.sh run
+# with READ_TRUTH=<truth> - read labels that depend on no reference, the same
+# reads, chr1-22 and regions (T2T) for both references, blocks oriented by the
+# other labelled reads
+READ_TRUTH_LABEL = {"matpat": "Q100 parental-copy truth", "yak": "parental k-mer truth"}
+
+
+def parental(ctx):
+    return ctx.read_truth != "truthtags"
+
+
+def parental_rows(ctx):
+    """rows of summary_recall_strata_<truth>.tsv at --depth"""
+    name = "summary_recall_strata_%s.tsv" % ctx.read_truth
+    rows = [r for r in table(path_of(ctx, "metrics_reads", name)) if r.get("depth") == str(ctx.depth)]
+    if not rows:
+        raise NoData("no %dx rows in metrics_reads/%s - run READ_TRUTH=%s bash bin/read_recall_strata.sh"
+                     % (ctx.depth, name, ctx.read_truth))
+    return rows
+
+
 # ------------------------------------------------- R5: why reads stay untagged
 
 # in drawing order, clockwise from 12 o'clock: the small classes first, so
@@ -930,15 +951,29 @@ def fig_r15(ctx):
     truth's haplotype / reads tagged by both, recall = the same / reads the
     truth tags. Rows: platform x input, columns: phasers; a PDF per metric and
     reference."""
-    rows = [r for r in table(path_of(ctx, "metrics", "summary_readacc_auto_min2.tsv"))
-            if int(float(r.get("depth", 0))) == ctx.depth]
-    if not rows:
-        raise NoData("no %dx rows in metrics/summary_readacc_auto_min2.tsv - run readacc_run.sh" % ctx.depth)
     val = {}
-    for r in rows:
-        k = (r["reference"], r["caller"], r["platform"], r["phaser"])
-        val[("precision",) + k] = 100 * num(r["read_precision"])
-        val[("recall",) + k] = 100 * num(r["read_recall"])
+    if parental(ctx):
+        for r in parental_rows(ctx):
+            if r["stratum"] != "genome":
+                continue
+            k = (r["reference"], r["caller"], r["platform"], r["phaser"])
+            tt, cp, cr = num(r["truth_tagged"]), num(r["compared"]), num(r["correct"])
+            if cp:
+                val[("precision",) + k] = 100 * cr / cp
+            if tt:
+                val[("recall",) + k] = 100 * cr / tt
+        how, sfx = "%s, blocks oriented by labelled reads" % READ_TRUTH_LABEL[ctx.read_truth], \
+            "_" + ctx.read_truth
+    else:
+        rows = [r for r in table(path_of(ctx, "metrics", "summary_readacc_auto_min2.tsv"))
+                if int(float(r.get("depth", 0))) == ctx.depth]
+        if not rows:
+            raise NoData("no %dx rows in metrics/summary_readacc_auto_min2.tsv - run readacc_run.sh" % ctx.depth)
+        for r in rows:
+            k = (r["reference"], r["caller"], r["platform"], r["phaser"])
+            val[("precision",) + k] = 100 * num(r["read_precision"])
+            val[("recall",) + k] = 100 * num(r["read_recall"])
+        how, sfx = "blocks oriented by their SNPs", ""
     inputs = [c for c in st.CALLERS if any(k[2] == c for k in val)]
     made = []
     for metric, label in (("precision", "Read haplotag precision (%)"), ("recall", "Read haplotag recall (%)")):
@@ -962,9 +997,9 @@ def fig_r15(ctx):
                          vmin=min(shown), vmax=max(shown))
             plt.setp(ax.get_xticklabels(), rotation=30, ha="right", rotation_mode="anchor")
             colorbar(fig, im, ax, label)
-            fig.suptitle("%s, %s, %dx, blocks oriented by their SNPs" % (
-                label.replace(" (%)", ""), st.REFERENCE_LABEL[ref], ctx.depth))
-            made.append(save(fig, ctx, "figR15_read_%s_%dx_%s" % (metric, ctx.depth, ref)))
+            fig.suptitle("%s, %s, %dx, %s" % (
+                label.replace(" (%)", ""), st.REFERENCE_LABEL[ref], ctx.depth, how))
+            made.append(save(fig, ctx, "figR15_read_%s_%dx_%s%s" % (metric, ctx.depth, ref, sfx)))
     if not made:
         raise NoData("nothing to draw")
     return ", ".join(made)
@@ -985,9 +1020,15 @@ def fig_r16(ctx):
       figR16_ratio_<input>         T2T-CHM13 / GRCh38; a cell with fewer than
                                    MIN_WRONG wrong reads on either reference is
                                    left out (a ratio of a few reads says nothing)"""
-    rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
-            if r.get("depth") == str(ctx.depth) and r.get("group_type") == "class"
-            and r.get("group") == "tagged"]
+    if parental(ctx):
+        rows = parental_rows(ctx)
+        sfx = "_" + ctx.read_truth
+        how = ", %s, T2T-CHM13 regions" % READ_TRUTH_LABEL[ctx.read_truth]
+    else:
+        rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+                if r.get("depth") == str(ctx.depth) and r.get("group_type") == "class"
+                and r.get("group") == "tagged"]
+        sfx = how = ""
     if not rows:
         raise NoData("no tagged-read rows at %dx in summary_classes.tsv" % ctx.depth)
     data = {}
@@ -1037,10 +1078,10 @@ def fig_r16(ctx):
             matrix = [[wrong(ref, c, p, ph, s_) for s_ in strata] for p, ph in line]
             if not any(v == v for row in matrix for v in row):
                 continue
-            made.append(draw("figR16_wrong_%s_%s" % (c, ref), line, matrix,
+            made.append(draw("figR16_wrong_%s_%s%s" % (c, ref, sfx), line, matrix,
                              "Tagged reads on the wrong haplotype (%%), %d×" % ctx.depth,
-                             "%s input, %s: tagged reads on the wrong haplotype" % (
-                                 st.CALLER_LABEL[c], st.REFERENCE_LABEL[ref]),
+                             "%s input, %s: tagged reads on the wrong haplotype%s" % (
+                                 st.CALLER_LABEL[c], st.REFERENCE_LABEL[ref], how),
                              cmap=st.SEQUENTIAL, vmin=min(shown), vmax=max(shown)))
     # T2T over GRCh38
     for c in inputs:
@@ -1058,10 +1099,10 @@ def fig_r16(ctx):
         if not shown:
             continue
         span = max(abs(math.log10(v)) for v in shown) or 1
-        made.append(draw("figR16_ratio_%s" % c, line, matrix,
+        made.append(draw("figR16_ratio_%s%s" % (c, sfx), line, matrix,
                          "Tagged reads on the wrong haplotype,\nT2T-CHM13 / GRCh38, %d×" % ctx.depth,
-                         "%s input: T2T-CHM13 against GRCh38 (blank: under %d wrong reads)" % (
-                             st.CALLER_LABEL[c], MIN_WRONG),
+                         "%s input: T2T-CHM13 against GRCh38 (blank: under %d wrong reads)%s" % (
+                             st.CALLER_LABEL[c], MIN_WRONG, how),
                          cmap=ENRICH, norm=LogNorm(vmin=10 ** -span, vmax=10 ** span)))
     if not made:
         raise NoData("nothing to draw")
@@ -1223,6 +1264,22 @@ def r18_draw(ctx, by):
         return r["caller"] if r.get("phaser") == ctx.phaser else None
 
     val = {}
+    if parental(ctx):
+        # accuracy and recall against the parental labels; N50 has no read truth
+        for r in parental_rows(ctx):
+            x = series(r)
+            if not x:
+                continue
+            k = (r["reference"], r["platform"], x, r["stratum"])
+            tt, cp, tb = num(r["truth_tagged"]), num(r["compared"]), num(r["truth_bases"])
+            if cp:
+                val[("accuracy",) + k] = 100 * num(r["correct"]) / cp
+            if tt:
+                val[("recall",) + k] = 100 * num(r["correct"]) / tt
+            if tb:
+                val[("recall_bases",) + k] = 100 * num(r["correct_bases"]) / tb
+        return r18_plot(ctx, by, val, "%s, T2T-CHM13 regions" % READ_TRUTH_LABEL[ctx.read_truth],
+                        "_" + ctx.read_truth)
     for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv")):
         x = series(r)
         if x and int(float(r.get("depth", 0))) == ctx.depth:
@@ -1246,6 +1303,11 @@ def r18_draw(ctx, by):
                 val[("recall",) + k] = 100 * num(r["correct"]) / tt
             if tb == tb and tb:
                 val[("recall_bases",) + k] = 100 * num(r["correct_bases"]) / tb
+    return r18_plot(ctx, by, val, "", "")
+
+
+def r18_plot(ctx, by, val, how, sfx):
+    """the PDFs of r18_draw from its values; how goes into the title, sfx into the name"""
     if by == "phaser":
         order, color, names = st.PHASERS, st.PHASER_COLOR, st.PHASER_LABEL
         applies = lambda p, x: st.applies(p, x)
@@ -1305,9 +1367,9 @@ def r18_draw(ctx, by):
         handles += [Patch(facecolor="white", edgecolor=st.INK, linewidth=0.8, label="T2T-CHM13 (bars)"),
                     Line2D([], [], color=st.INK, linewidth=1.3, label="GRCh38 (line)")]
         fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
-        fig.suptitle("%s: T2T-CHM13 against GRCh38, %s, %dx" % (
-            label.replace(" (%)", "").replace(" (Mb)", ""), fixed, ctx.depth))
-        made.append(save(fig, ctx, "figR18_refs_%s_%s_%dx" % (metric, tag, ctx.depth)))
+        fig.suptitle("%s: T2T-CHM13 against GRCh38, %s, %dx%s" % (
+            label.replace(" (%)", "").replace(" (Mb)", ""), fixed, ctx.depth, ", " + how if how else ""))
+        made.append(save(fig, ctx, "figR18_refs_%s_%s_%dx%s" % (metric, tag, ctx.depth, sfx)))
     return ", ".join(made)
 
 FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10),
@@ -1334,6 +1396,8 @@ def main():
     ap.add_argument("--min-slice", type=float, default=0.025,
                     help="R5: smallest drawn slice, as a fraction of the ring (0: true sizes)")
     ap.add_argument("--top", type=int, default=7, help="R9: columns per group")
+    ap.add_argument("--read-truth", choices=["truthtags", "matpat", "yak"], default="truthtags",
+                    help="R15, R16, R18: read labels (matpat, yak: no reference, T2T regions)")
     ap.add_argument("--png", action="store_true")
     ctx = ap.parse_args()
     ctx.out = ctx.out or os.path.join(ctx.root, "plots", "pdf")
