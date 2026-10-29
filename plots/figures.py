@@ -294,10 +294,30 @@ def better_top_right(axes):
     axes[0].invert_yaxis()
 
 
+# fig3: the switch error rate of PacBio stays under this (%); its panels get a
+# y axis of their own up to it, not the ONT one up to 2%
+FIG3_PACBIO_MAX = 0.5
+
+
 def fig3(db, ctx, ref, caller="truth"):
+    # one shape: the colour is the phaser, the size of the ball the coverage,
+    # small at 10x to big at 50x
     sizes = [5 + 7 * i for i in range(len(st.DEPTHS))]
-    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), sharex=True)
-    xs_all, ys_all = [], []
+    # as panel_row, but y is shared within a technology only
+    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, st.PANEL_HEIGHT * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, len(st.PLATFORMS), height_ratios=[0.08, 1])
+    legend_ax = fig.add_subplot(grid[0, :])
+    legend_ax.axis("off")
+    tech = {pl: t for t, pls in TECHNOLOGIES for pl in pls}
+    axes, first_of = [], {}
+    for i, platform in enumerate(st.PLATFORMS):
+        t = tech.get(platform, platform)
+        ax = fig.add_subplot(grid[1, i], sharex=axes[0] if axes else None, sharey=first_of.get(t))
+        if t in first_of:
+            ax.tick_params(labelleft=False)
+        first_of.setdefault(t, ax)
+        axes.append(ax)
+    xs_all, ys_by = [], {}
     for ax, platform in zip(axes, st.PLATFORMS):
         lines = 0
         for phaser in st.PHASERS:
@@ -312,10 +332,9 @@ def fig3(db, ctx, ref, caller="truth"):
             xs, ys, ss = zip(*pts)
             ax.plot(xs, ys, color=st.PHASER_COLOR[phaser], linewidth=0.8, zorder=2)
             ax.scatter(xs, ys, s=ss, color=st.PHASER_COLOR[phaser],
-                       marker=st.PHASER_MARKER[phaser], edgecolor="white",
-                       linewidth=0.5, zorder=3)
+                       marker="o", edgecolor="white", linewidth=0.5, zorder=3)
             xs_all.extend(xs)
-            ys_all.extend(ys)
+            ys_by.setdefault(tech.get(platform, platform), []).extend(ys)
             lines += 1
         ax.set_title(st.PLATFORM_LABEL[platform])
         ax.set_xlabel("Phase block NG50 (Mb)")
@@ -327,17 +346,26 @@ def fig3(db, ctx, ref, caller="truth"):
         raise NoData("no %s rows for %s" % (caller, ref))
 
     axes[0].set_xscale("log")
-    axes[0].set_yscale("log")
     log_ticks(axes[0].xaxis, min(xs_all), max(xs_all))
-    log_ticks(axes[0].yaxis, min(ys_all), max(ys_all))
-    better_top_right(axes)
-    axes[0].set_ylabel("Switch error rate (%)")
+    for t, ax in first_of.items():
+        ys = ys_by.get(t)
+        if not ys:
+            continue
+        ax.set_yscale("log")
+        lo, hi = min(ys) / 1.25, max(ys) * 1.25
+        if t == "PacBio":
+            hi = FIG3_PACBIO_MAX
+        # fewer errors go up, so the best run sits in the top right corner
+        ax.set_ylim(hi, lo)
+        log_ticks(ax.yaxis, lo, hi)
+        ax.set_ylabel("Switch error rate (%)")
 
+    phasers = [series_handle(st.PHASER_COLOR[p], "o", st.PHASER_LABEL[p]) for p in st.PHASERS]
     coverage = [Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
                        markeredgecolor="white", markersize=math.sqrt(s),
                        label="%d×" % d)
-                for d, s in ((st.DEPTHS[0], sizes[0]), (st.DEPTHS[-1], sizes[-1]))]
-    top_legend(legend_ax, phaser_handles() + coverage)
+                for d, s in zip(st.DEPTHS, sizes)]
+    top_legend(legend_ax, phasers + coverage, handletextpad=0.3, columnspacing=1.0)
     return save(fig, ctx, "fig3_accuracy_vs_contiguity_" + ref)
 
 
