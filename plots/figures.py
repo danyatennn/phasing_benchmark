@@ -1303,9 +1303,12 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
         pct = 100 * (m - 1)
         text = ("%+.1f%%" if abs(pct) < 10 else "%+.0f%%") % pct
         return text.replace("-", "\u2212")
+    # a box with no run (HiPhase on ONT) takes no room
+    groups = [(g, [m for m in members if any(pairs.get(c) for c in m[2])]) for g, members in groups]
+    groups = [(g, members) for g, members in groups if members]
     boxes = sum(len(boxes) for _, boxes in groups)
     # four boxes fit SMALL_WIDTH, so fig6 by platform is as narrow as fig7g
-    width = max(st.SMALL_WIDTH, 20 + 11 * boxes)
+    width = max(st.SMALL_WIDTH, 20 + 8 * boxes)
     fig, ax = plt.subplots(figsize=(width * st.MM, 70 * st.MM),
                            constrained_layout=True)
     rng = np.random.RandomState(0)
@@ -1315,13 +1318,13 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
         for box_label, color, cells in members:
             r = [y / x for c in cells for x, y in pairs.get(c, [])]
             if r:
-                ax.boxplot([r], positions=[pos], widths=0.6, patch_artist=True,
+                ax.boxplot([r], positions=[pos], widths=0.55, patch_artist=True,
                            showfliers=False, zorder=3,
                            boxprops=dict(facecolor=color, alpha=0.3, edgecolor=color, linewidth=0.8),
                            medianprops=dict(color=st.INK, linewidth=1.2),
                            whiskerprops=dict(color=color, linewidth=0.8),
                            capprops=dict(color=color, linewidth=0.8))
-                ax.scatter(pos + rng.uniform(-0.2, 0.2, len(r)), r, s=5, color=color,
+                ax.scatter(pos + rng.uniform(-0.18, 0.18, len(r)), r, s=5, color=color,
                            edgecolor="white", linewidth=0.3, alpha=0.8, zorder=4)
                 # over the highest point, so no point sits under the number
                 top = max(r)
