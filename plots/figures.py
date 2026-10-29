@@ -570,7 +570,7 @@ def grid_heatmap(db, ctx, ref, name, value, bar_label):
 
     fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * st.MM, 92 * st.MM), constrained_layout=True)
     im = heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups,
-                 label=short_number, cmap=st.SEQUENTIAL, norm=log_norm(values))
+                 label=lambda v: f"{v:.2f}", cmap=st.SEQUENTIAL, norm=log_norm(values))
     ax.set_xlabel("Coverage (×)")
     colorbar(fig, im, ax, bar_label)
     return save(fig, ctx, name + "_" + ref)
@@ -680,7 +680,7 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **i
     im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows],
                  [stratum_label(s) for s in strata], platform_groups(rows),
                  [("", len(strata))],
-                 label=lambda v: "0" if v <= floor else (fmt or short_number)(v), **image)
+                 label=lambda v: "0.00" if v <= floor else (fmt or (lambda x: f"{x:.2f}"))(v), **image)
     for i, j, text in noted:
         ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor="white", edgecolor=st.MISSING,
                                hatch="....", linewidth=0, zorder=1.5))
@@ -700,7 +700,7 @@ def fig8(db, ctx, ref, caller="truth"):
     def note(platform, phaser, stratum):
         """no switch at all: written as 0 in an uncoloured cell"""
         row = db.stratum((ref, caller, platform, depth, phaser), stratum)
-        return "0" if row and row["assessed"] and not row["switches"] else None
+        return "0.00" if row and row["assessed"] and not row["switches"] else None
 
     out = strata_heatmap(ctx, "fig8_switch_rate_by_stratum_%dx_%s" % (depth, ref),
                          db.strata_names(), rate, "Switch error rate (%%), %d×" % depth,
