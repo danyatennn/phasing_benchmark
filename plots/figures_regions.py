@@ -8,7 +8,7 @@
                               From metrics_strata_auto/vaf_<ref>.tsv
                               (bin/vaf_strata.sh).
   figR2_tagged_strata_<ref>   reads tagged per region: a panel per region, a
-                              bar per platform (the mean over the phasers run
+                              horizontal bar per platform (the mean over the phasers run
                               on every platform), a point per phaser. A read is
                               tagged if whatshap haplotag put it on H1/H2 in a
                               block of two or more SNPs, and is in a region if
@@ -39,7 +39,7 @@ from matplotlib.patches import Patch
 
 import style as st
 from data import Metrics, sample_root
-from figures import NoData, finite, save, series_handle, stratum_label, top_legend, y_grid
+from figures import NoData, finite, save, series_handle, stratum_label, top_legend
 
 PLATFORM_SHORT = {"ont4k": "ONT\n4 kHz", "ont5k": "ONT\n5 kHz", "hifi": "PacBio\nSequel II",
                   "revio": "PacBio\nRevio"}
@@ -196,41 +196,46 @@ def fig_tagged(ctx, db, ref):
     # the bar is over the phasers run on every platform, so the platforms share it
     common = [p for p in phasers if all(st.applies(pl, p) for pl in platforms)]
 
+    # horizontal bars: a row per platform, the share tagged along x, the legend
+    # under the panels
     ncols = min(4, len(regions))
     nrows = math.ceil(len(regions) / ncols)
-    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, (10 + 42 * nrows) * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(nrows + 1, ncols, height_ratios=[0.12] + [1] * nrows)
-    legend_ax = fig.add_subplot(grid[0, :])
+    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, (16 + 38 * nrows) * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(nrows + 1, ncols, height_ratios=[1] * nrows + [0.16])
+    legend_ax = fig.add_subplot(grid[nrows, :])
     legend_ax.axis("off")
 
-    x = np.arange(len(platforms))
+    y = np.arange(len(platforms))
     offsets = np.linspace(-0.27, 0.27, len(phasers)) if len(phasers) > 1 else [0.0]
     first = None
     for n, region in enumerate(regions):
-        ax = fig.add_subplot(grid[1 + n // ncols, n % ncols], sharey=first)
+        ax = fig.add_subplot(grid[n // ncols, n % ncols], sharex=first)
         first = first or ax
         for i, platform in enumerate(platforms):
             color = st.PLATFORM_COLOR[platform]
             bar = [values[p][platform][region] for p in common
                    if region in values[p].get(platform, {})]
             if bar:
-                ax.bar(i, np.mean(bar), width=0.75, color=color, alpha=0.3, linewidth=0, zorder=2)
+                ax.barh(i, np.mean(bar), height=0.75, color=color, alpha=0.3, linewidth=0, zorder=2)
             for off, phaser in zip(offsets, phasers):
                 v = values[phaser].get(platform, {}).get(region)
                 if v is not None:
-                    ax.plot(i + off, v, marker=st.PHASER_MARKER[phaser], color=color,
+                    ax.plot(v, i + off, marker=st.PHASER_MARKER[phaser], color=color,
                             markeredgecolor="white", linestyle="none", zorder=3)
         title = "Confident regions (chr1-22)" if region == "genome" else stratum_label(region)
         ax.set_title(title.replace("\n", " "))
-        ax.set_xticks(x)
-        ax.set_xticklabels([PLATFORM_SHORT[p] for p in platforms])
-        ax.set_xlim(-0.6, len(platforms) - 0.4)
-        ax.set_ylim(0, 100)
-        y_grid(ax)
+        ax.set_yticks(y)
+        ax.set_yticklabels([PLATFORM_SHORT[p] for p in platforms])
+        ax.set_ylim(len(platforms) - 0.4, -0.6)
+        ax.set_xlim(0, 100)
+        ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
+        ax.set_axisbelow(True)
+        ax.tick_params(axis="y", length=0)
         if n % ncols:
             ax.tick_params(labelleft=False)
-        else:
-            ax.set_ylabel("%s tagged (%%)" % ("Reads" if ctx.unit == "reads" else "Read bases"))
+        # the x label once per row of panels would repeat; it goes on the last row
+        if n // ncols == nrows - 1 or n + ncols >= len(regions):
+            ax.set_xlabel("%s tagged (%%)" % ("Reads" if ctx.unit == "reads" else "Read bases"))
 
     handles = [Patch(color=st.PLATFORM_COLOR[p], alpha=0.3, label=st.PLATFORM_LABEL[p]) for p in platforms]
     handles += [series_handle(st.INK, st.PHASER_MARKER[p], st.PHASER_LABEL[p], line=False) for p in phasers]
