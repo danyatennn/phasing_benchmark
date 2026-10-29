@@ -5,8 +5,11 @@ nothing to show raises NoData.
   fig7d   read precision, blocks oriented by an anchor read against by SNPs
   fig7e   truth-labelled reads not tagged to their haplotype (1 - recall)
           against three read truths (whatshap on the truth VCF, alignment to
-          the parental Q100 copies, parental k-mers), bars
+          the parental Q100 copies, parental k-mers), blocks oriented by their
+          SNPs, reads labelled by both the truth VCF and that truth; bars
   fig7f   tagged reads on the wrong haplotype (1 - precision), the same truths
+  fig7g   truth-tagged reads missed (1 - recall): anchor over SNP orientation
+          against the SNP one, every run (Bland-Altman / MA plot)
   fig10a  why reads are not tagged: share of reads per class
   fig10b  the same in bases
   fig10c  confidence of the tagged reads
@@ -31,7 +34,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes
@@ -462,6 +465,68 @@ def fig7d(db, ctx, ref):
     return save(fig, ctx, "fig7d_anchor_vs_variant_orientation_" + ref)
 
 
+def fig7g(db, ctx, ref):
+    """Every run as in a Bland-Altman / MA plot: x the share of truth-tagged
+    reads not assigned to their haplotype (1 - read recall) with blocks
+    oriented by their SNPs, y how many times more there are with blocks
+    oriented by an anchor read. No difference is the dashed line at 1; the
+    shaded side is where the SNP orientation is better. y runs from 0.8 to 2,
+    so the gap from 1 shows; runs outside are left out."""
+    fig = plt.figure(figsize=(st.FULL_WIDTH * 0.6 * st.MM, 80 * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.15])
+    ax = fig.add_subplot(grid[0])
+    legend_ax = fig.add_subplot(grid[1])
+    legend_ax.axis("off")
+    xs_all, ys_all = [], []
+    for platform in st.PLATFORMS:
+        for phaser in st.PHASERS:
+            if not st.applies(platform, phaser):
+                continue
+            xs, ys = [], []
+            for caller in st.CALLERS:
+                for depth in st.DEPTHS:
+                    key = (ref, caller, platform, depth, phaser)
+                    snp = 1 - db.get(key, "read_recall")
+                    anchor = 1 - db.get(key, "read_recall_anchor_truthtags")
+                    if finite(snp) and finite(anchor) and snp > 0 and anchor > 0:
+                        xs.append(100 * snp)
+                        ys.append(anchor / snp)
+            ax.scatter(xs, ys, s=12, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
+                       alpha=0.8, edgecolor="white", linewidth=0.3, zorder=3)
+            xs_all += xs
+            ys_all += ys
+    if not xs_all:
+        plt.close(fig)
+        raise NoData("no anchor-oriented read recall for %s - run readacc_anchor.sh" % ref)
+    xlo, xhi = min(xs_all) / 1.2, max(xs_all) * 1.2
+    ylo, yhi = 0.8, 2.0
+    ax.set_xscale("log")
+    ax.set_yscale("log", base=2)
+    ax.set_xlim(xlo, xhi)
+    ax.set_ylim(ylo, yhi)
+    log_ticks(ax.xaxis, xlo, xhi)
+    ax.yaxis.set_major_locator(FixedLocator([0.8, 1, 1.25, 1.5, 2]))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    ax.yaxis.set_minor_locator(NullLocator())
+    ax.axhspan(1, yhi, color=st.MUTED, alpha=0.07, linewidth=0, zorder=0)
+    ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
+    ax.text(0.02, 0.96, "%.0f%% of runs > 1; median ×%.2f" % (
+                100 * sum(y > 1 for y in ys_all) / len(ys_all), float(np.median(ys_all))),
+            transform=ax.transAxes, ha="left", va="top", color=st.INK)
+    ax.set_xlabel("Truth-tagged reads not assigned to their haplotype (%),\nSNP-oriented blocks")
+    ax.set_ylabel("Fold increase in reads not assigned\n(anchor read vs SNP orientation)")
+    ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
+    ax.set_axisbelow(True)
+    first = legend_ax.legend(handles=platform_handles(line=False), loc="upper center", ncol=len(st.PLATFORMS),
+                             borderaxespad=0, handletextpad=0.2, columnspacing=1.0)
+    legend_ax.add_artist(first)
+    legend_ax.legend(handles=[Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
+                                     markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS],
+                     loc="lower center", ncol=len(st.PHASERS), borderaxespad=0, handletextpad=0.2,
+                     columnspacing=1.0)
+    return save(fig, ctx, "fig7g_anchor_vs_variant_recall_ratio_" + ref)
+
+
 TRUTH_LABEL = {"truthtags": "GIAB truth VCF (whatshap haplotag)",
                "matpat": "Q100 parental copies (alignment)",
                "yak": "Parental k-mers (yak)"}
@@ -472,8 +537,11 @@ def read_truth_bars(db, ctx, ref, column, ylabel, name):
     """Truth-input runs: a panel per platform, a group per phaser, a bar per
     read truth - which haplotype a read comes from, by the truth VCF, by
     alignment to the two parental copies of the Q100 assembly, or by parental
-    k-mers. Blocks are oriented by an anchor read. The bars are the error, not
-    the accuracy: 97% against 98% is invisible on bars, 3% against 2% is not."""
+    k-mers (bin/readacc_truths.sh). Every block is oriented by its SNPs, the
+    same for all three truths, and only reads with a label of both this truth
+    and the truth VCF count, so the bars differ by the labels alone. The bars
+    are the error, not the accuracy: 97% against 98% is invisible on bars, 3%
+    against 2% is not."""
     depth = ctx.depth
     fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 12)
     xs, w = offsets(len(TRUTH_LABEL))
@@ -483,7 +551,7 @@ def read_truth_bars(db, ctx, ref, column, ylabel, name):
         for x, phaser in enumerate(phasers):
             key = (ref, "truth", platform, depth, phaser)
             for dx, truth in zip(xs, TRUTH_LABEL):
-                v = bar(ax, x + dx, 100 * (1 - db.get(key, "%s_anchor_%s" % (column, truth))),
+                v = bar(ax, x + dx, 100 * (1 - db.get(key, "%s_common_var_%s" % (column, truth))),
                         w, TRUTH_COLOR[truth])
                 if v is not None:
                     drawn.append(v)
@@ -492,15 +560,15 @@ def read_truth_bars(db, ctx, ref, column, ylabel, name):
         ax.set_title(st.PLATFORM_LABEL[platform])
     if not drawn:
         plt.close(fig)
-        raise NoData("no anchor accuracy for %s at %dx" % (ref, depth))
+        raise NoData("no read accuracy against the read truths for %s at %dx" % (ref, depth))
     scale_axes(axes, drawn, False, ylabel)
     top_legend(legend_ax, [Patch(color=TRUTH_COLOR[t], label=label) for t, label in TRUTH_LABEL.items()])
     return save(fig, ctx, name)
 
 
 def fig7e(db, ctx, ref):
-    """Reads with a truth label that the run does not tag to that haplotype:
-    1 - read recall (untagged reads and reads on the wrong haplotype)."""
+    """Reads with a label that the run does not tag to that haplotype: 1 -
+    read recall (untagged reads and reads on the wrong haplotype)."""
     return read_truth_bars(db, ctx, ref, "read_recall",
                            "Truth-labelled reads not tagged\nto their haplotype (%%), %d×" % ctx.depth,
                            "fig7e_read_missed_by_truth_%dx_%s" % (ctx.depth, ref))
@@ -727,6 +795,7 @@ FIGURES_EXTRA = [
     ("fig7d", fig7d, True),
     ("fig7e", fig7e, True),
     ("fig7f", fig7f, True),
+    ("fig7g", fig7g, True),
     ("fig10a", fig10a, True),
     ("fig10b", fig10b, True),
     ("fig10c", fig10c, True),
