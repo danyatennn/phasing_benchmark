@@ -1205,17 +1205,25 @@ FINE_RATIO_TICKS = [0.9, 0.92, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1, 1.01, 1.02
                     1.05, 1.06, 1.08, 1.1]
 
 
-REFERENCE_RATIO_LIMITS = (0.5, 1.5)  # fig6 ratios: a linear axis with 1 in the middle
+# fig6 ratios: a linear axis with 1 in the middle, as far below as above
+REFERENCE_RATIO_LIMITS = "symmetric"
+# half spans whose half is round too: the ticks are 1, 1 +- half/2, 1 +- half
+NICE_HALF_SPANS = [0.02, 0.04, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1, 1.2, 1.6, 2]
 
 
 def ratio_axis(ax, ratios, label, limits=None):
     """Log ratio, symmetric about 1 and zoomed to the data: a spread of 2% gets an
     axis of about +-3%, not the +-25% it used to get, so the boxes stay readable.
     The band of +-10% is shaded only when it fits inside the axis; on a zoomed
-    axis every point is within 10% anyway. With limits (lo, hi) the axis is
-    linear over them instead, the same for every file."""
+    axis every point is within 10% anyway. With limits the axis is linear
+    instead: (lo, hi) as given, or "symmetric" - 1 +- the smallest round step
+    that holds every ratio, the same distance below 1 as above."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     if limits:
+        if limits == "symmetric":
+            far = max(abs(r - 1) for r in ratios) * 1.05
+            half = next((h for h in NICE_HALF_SPANS if h >= far), NICE_HALF_SPANS[-1])
+            limits = (1 - half, 1 + half)
         lo, hi = limits
         ax.set_ylim(lo, hi)
         if BAND < hi:
@@ -1224,7 +1232,9 @@ def ratio_axis(ax, ratios, label, limits=None):
         ax.set_yticks([lo + i * (hi - lo) / 4 for i in range(5)])
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
         ax.yaxis.set_minor_locator(NullLocator())
-        ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
+        # a ratio has no unit: "Switch error rate (%)" becomes "Switch error rate"
+        ax.set_ylabel("%s,\n%s / %s" % (label.replace(" (%)", "").replace(" (Mb)", ""),
+                                        st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
         return
     span = max(abs(math.log10(r)) for r in ratios)
     span = max(span * 1.25, math.log10(1.03))
@@ -1280,7 +1290,7 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
                            edgecolor="white", linewidth=0.3, alpha=0.8, zorder=4)
                 # over the highest point, so no point sits under the number
                 top = max(r)
-                if limits:
+                if isinstance(limits, tuple):
                     top = min(top, limits[1])
                 ax.annotate(change(float(np.median(r))), xy=(pos, top), xytext=(0, 2),
                             textcoords="offset points", ha="center", va="bottom", annotation_clip=False)
@@ -1381,14 +1391,43 @@ def fig6c(db, ctx):
                              recall_pct, "Correctly phased truth het SNPs (%)", log=False)
 
 
+def matpat_recall(db):
+    """read recall against the Q100 parental-copy labels, genome-wide, by
+    (reference, caller, platform, depth, phaser): metrics_reads/
+    summary_recall_strata_matpat.tsv of READ_TRUTH=matpat bin/read_recall_strata.sh,
+    as figR18 ..._matpat. The same reads on both references - primary on
+    GRCh38 and on T2T, a parental label, 2 truth het SNPs or more - so the
+    denominator is the same for both; recall = correct / truth_tagged."""
+    path = os.path.join(db.sample_root, "metrics_reads", "summary_recall_strata_matpat.tsv")
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path) as fh:
+        header = fh.readline().rstrip("\n").lstrip("#").split("\t")
+        for line in fh:
+            r = dict(zip(header, line.rstrip("\n").split("\t")))
+            if r.get("stratum") != "genome":
+                continue
+            try:
+                tagged, correct = float(r["truth_tagged"]), float(r["correct"])
+                key = (r["reference"], r["caller"], r["platform"], int(float(r["depth"])), r["phaser"])
+            except (KeyError, ValueError):
+                continue
+            if tagged > 0:
+                out[key] = 100 * correct / tagged
+    return out
+
+
 def fig6d(db, ctx):
-    return reference_files(db, ctx, "fig6d_reference_read_recall", read_recall_pct,
+    recall = matpat_recall(db)
+    if not recall:
+        raise NoData("no metrics_reads/summary_recall_strata_matpat.tsv - run "
+                     "READ_TRUTH=matpat bash bin/read_recall_strata.sh on both references")
+    return reference_files(db, ctx, "fig6d_reference_read_recall_matpat",
+                           lambda db, key: recall.get(key, NAN),
                            "Haplotagging read recall (%)",
                            "Comparison of haplotagging recall between T2T-CHM13 and GRCh38 "
-                           "across sequencing platforms",
-                           # recall moves by a percent or two between the references: on
-                           # 0.5-1.5 every box would be a line, so the axis is zoomed
-                           limits=None)
+                           "across sequencing platforms")
 
 
 # (id, function, drawn once per reference?)
