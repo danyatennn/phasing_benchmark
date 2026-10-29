@@ -469,9 +469,9 @@ def fig7g(db, ctx, ref):
     """Every run as in a Bland-Altman / MA plot: x the share of truth-tagged
     reads not assigned to their haplotype (1 - read recall) with blocks
     oriented by their SNPs, y how many times more there are with blocks
-    oriented by an anchor read. No difference is the dashed line at 1; the
-    shaded side is where the SNP orientation is better. y runs from 0.8 to 2,
-    so the gap from 1 shows; runs outside are left out."""
+    oriented by an anchor read. No difference is the dashed line at 1; over it
+    the SNP orientation is better. y runs from 0.8 to 2, so the gap from 1
+    shows; runs outside are left out."""
     fig = plt.figure(figsize=(st.FULL_WIDTH * 0.6 * st.MM, 80 * st.MM), constrained_layout=True)
     grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.15])
     ax = fig.add_subplot(grid[0])
@@ -508,7 +508,6 @@ def fig7g(db, ctx, ref):
     ax.yaxis.set_major_locator(FixedLocator([0.8, 1, 1.25, 1.5, 2]))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
     ax.yaxis.set_minor_locator(NullLocator())
-    ax.axhspan(1, yhi, color=st.MUTED, alpha=0.07, linewidth=0, zorder=0)
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
     ax.set_title("Comparison of haplotagging error rates using\ndifferent phase-block orientation strategies")
     ax.set_xlabel("Truth-tagged reads not assigned to their haplotype (%),\nSNP-oriented blocks")
