@@ -22,6 +22,7 @@ Which denominators are shared, and so what may be compared with what:
 
 import math
 import os
+import textwrap
 
 import numpy as np
 
@@ -1204,12 +1205,27 @@ FINE_RATIO_TICKS = [0.9, 0.92, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1, 1.01, 1.02
                     1.05, 1.06, 1.08, 1.1]
 
 
-def ratio_axis(ax, ratios, label):
+REFERENCE_RATIO_LIMITS = (0.5, 1.5)  # fig6 ratios: a linear axis with 1 in the middle
+
+
+def ratio_axis(ax, ratios, label, limits=None):
     """Log ratio, symmetric about 1 and zoomed to the data: a spread of 2% gets an
     axis of about +-3%, not the +-25% it used to get, so the boxes stay readable.
     The band of +-10% is shaded only when it fits inside the axis; on a zoomed
-    axis every point is within 10% anyway."""
+    axis every point is within 10% anyway. With limits (lo, hi) the axis is
+    linear over them instead, the same for every file."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
+    if limits:
+        lo, hi = limits
+        ax.set_ylim(lo, hi)
+        if BAND < hi:
+            ax.axhspan(1 / BAND, BAND, color=st.GRID, linewidth=0, zorder=0)
+        ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
+        ax.set_yticks([lo + i * (hi - lo) / 4 for i in range(5)])
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+        ax.yaxis.set_minor_locator(NullLocator())
+        ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
+        return
     span = max(abs(math.log10(r)) for r in ratios)
     span = max(span * 1.25, math.log10(1.03))
     lo, hi = 10 ** -span, 10 ** span
@@ -1229,12 +1245,13 @@ def ratio_axis(ax, ratios, label):
     ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
 
 
-def reference_box_file(db, ctx, name, value, label, groups):
+def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=None):
     """groups: [(group label, [(box label, colour, [(platform, phaser), ...])])].
     Every point is one run on both references (same platform, coverage and
     phaser); a box pools the coverages. The box is the middle half of the
     ratios, its whiskers reach the furthest ratio within 1.5 box lengths, the
-    black bar is the median, written above as the change on T2T in percent."""
+    black bar is the median, written as the change on T2T in percent just
+    over the highest point of the box."""
     pairs = reference_pairs(db, value)
     all_ratios = [y / x for pts in pairs.values() for x, y in pts]
     def change(m):
@@ -1261,9 +1278,12 @@ def reference_box_file(db, ctx, name, value, label, groups):
                            capprops=dict(color=color, linewidth=0.8))
                 ax.scatter(pos + rng.uniform(-0.2, 0.2, len(r)), r, s=5, color=color,
                            edgecolor="white", linewidth=0.3, alpha=0.8, zorder=4)
-                ax.annotate(change(float(np.median(r))), xy=(pos, 1),
-                            xycoords=ax.get_xaxis_transform(), xytext=(0, 2),
-                            textcoords="offset points", ha="center", va="bottom")
+                # over the highest point, so no point sits under the number
+                top = max(r)
+                if limits:
+                    top = min(top, limits[1])
+                ax.annotate(change(float(np.median(r))), xy=(pos, top), xytext=(0, 2),
+                            textcoords="offset points", ha="center", va="bottom", annotation_clip=False)
             ticks.append(pos)
             tick_labels.append(box_label)
             pos += 1
@@ -1274,7 +1294,9 @@ def reference_box_file(db, ctx, name, value, label, groups):
             if g < len(groups) - 1:
                 ax.axvline(pos - 0.5 + 0.35, color=st.GRID, linewidth=0.8, zorder=0)
         pos += 0.7 if g < len(groups) - 1 else 0
-    ratio_axis(ax, all_ratios, label)
+    ratio_axis(ax, all_ratios, label, limits)
+    if title:
+        fig.suptitle(textwrap.fill(title, max(30, int((34 + 11 * boxes) / 1.9))))
     ax.set_xticks(ticks)
     ax.set_xticklabels(tick_labels, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_xlim(-0.6, pos - 0.4)
@@ -1291,9 +1313,9 @@ def phaser_shapes():
                    markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS]
 
 
-def reference_files(db, ctx, prefix, value, label):
+def reference_files(db, ctx, prefix, value, label, title=None, limits=REFERENCE_RATIO_LIMITS):
     """Every file of one metric; a file with nothing to show is skipped and
-    the others are still drawn."""
+    the others are still drawn. title and limits go to the ratio files."""
     every = [(pl, ph) for pl in st.PLATFORMS for ph in st.PHASERS]
     jobs = [
         ("scatter_all", lambda: reference_scatter_file(
@@ -1315,17 +1337,17 @@ def reference_files(db, ctx, prefix, value, label):
                  for p in st.PHASERS]
     jobs += [
         ("ratio_by_phaser", lambda: reference_box_file(
-            db, ctx, prefix + "_ratio_by_phaser", value, label, [("", by_phaser)])),
+            db, ctx, prefix + "_ratio_by_phaser", value, label, [("", by_phaser)], title, limits)),
         ("ratio_by_technology", lambda: reference_box_file(
             db, ctx, prefix + "_ratio_by_technology", value, label,
             [(tech, [(st.PHASER_LABEL[p], st.PHASER_COLOR[p], [(pl, p) for pl in platforms])
                      for p in st.PHASERS])
-             for tech, platforms in TECHNOLOGIES])),
+             for tech, platforms in TECHNOLOGIES], title, limits)),
         ("ratio_by_platform", lambda: reference_box_file(
             db, ctx, prefix + "_ratio_by_platform", value, label,
             [(tech, [(st.PLATFORM_LABEL[pl], st.PLATFORM_COLOR[pl], [(pl, p) for p in st.PHASERS])
                      for pl in platforms])
-             for tech, platforms in TECHNOLOGIES])),
+             for tech, platforms in TECHNOLOGIES], title, limits)),
     ]
     written = []
     for _, job in jobs:
@@ -1342,17 +1364,31 @@ def reference_files(db, ctx, prefix, value, label):
 
 def fig6a(db, ctx):
     return reference_files(db, ctx, "fig6a_reference_switch_rate", switch_pct,
-                           "Switch error rate (%)")
+                           "Switch error rate (%)",
+                           "Comparison of switch error rates between T2T-CHM13 and GRCh38 "
+                           "across sequencing platforms")
 
 
 def fig6b(db, ctx):
     return reference_files(db, ctx, "fig6b_reference_block_ng50", n50_mb,
-                           "Phase block NG50 (Mb)")
+                           "Phase block NG50 (Mb)",
+                           "Comparison of phase block NG50 between T2T-CHM13 and GRCh38 "
+                           "across sequencing platforms")
 
 
 def fig6c(db, ctx):
     return reference_scatter(db, ctx, "fig6c_reference_recall_phased",
                              recall_pct, "Correctly phased truth het SNPs (%)", log=False)
+
+
+def fig6d(db, ctx):
+    return reference_files(db, ctx, "fig6d_reference_read_recall", read_recall_pct,
+                           "Haplotagging read recall (%)",
+                           "Comparison of haplotagging recall between T2T-CHM13 and GRCh38 "
+                           "across sequencing platforms",
+                           # recall moves by a percent or two between the references: on
+                           # 0.5-1.5 every box would be a line, so the axis is zoomed
+                           limits=None)
 
 
 # (id, function, drawn once per reference?)
@@ -1376,6 +1412,7 @@ FIGURES = [
     ("fig6a", fig6a, False),
     ("fig6b", fig6b, False),
     ("fig6c", fig6c, False),
+    ("fig6d", fig6d, False),
     ("fig7a", fig7a, True),
     ("fig7b", fig7b, True),
     ("fig7c", fig7c, True),
