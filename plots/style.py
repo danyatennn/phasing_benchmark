@@ -113,6 +113,7 @@ FONT_SIZE = 7
 MM = 1 / 25.4
 FULL_WIDTH = 180  # mm, a two-column figure
 PANEL_HEIGHT = 50  # mm, one row of panels
+SMALL_WIDTH = 64  # mm, a narrow figure that sits beside others of its width (fig6 by platform, fig7g)
 
 FONT_STACK = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
 

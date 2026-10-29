@@ -383,19 +383,13 @@ def phaser_axis(ax):
 
 
 def fig4(db, ctx, ref, caller="truth"):
-    """A panel per platform, one under the other, sharing x; in each a pair of
-    horizontal bars per phaser, side by side, not stacked: switch errors (a
-    stretch phased the wrong way, dark) and flip errors (a single site, light)."""
+    """Switch errors (a stretch phased the wrong way) per 100 assessed pairs:
+    a panel per platform, one under the other, sharing x, a horizontal bar per
+    phaser. The phaser is named on the axis, so no legend."""
     depth = ctx.depth
     n = len(st.PLATFORMS)
-    fig = plt.figure(figsize=(88 * st.MM, (14 + 27 * n) * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(n + 1, 1, height_ratios=[1] * n + [0.12])
-    axes = []
-    for i in range(n):
-        axes.append(fig.add_subplot(grid[i, 0], sharex=axes[0] if axes else None))
-    legend_ax = fig.add_subplot(grid[n, 0])
-    legend_ax.axis("off")
-    h = 0.38
+    fig, axes = plt.subplots(n, 1, sharex=True, figsize=(80 * st.MM, (10 + 19 * n) * st.MM),
+                             constrained_layout=True)
     bars = 0
     for ax, platform in zip(axes, st.PLATFORMS):
         here = 0
@@ -403,17 +397,13 @@ def fig4(db, ctx, ref, caller="truth"):
             rates = db.switch_flip((ref, caller, platform, depth, phaser))
             if rates is None:
                 continue
-            switches, flips = 100 * rates[0], 100 * rates[1]
-            color = st.PHASER_COLOR[phaser]
-            ax.barh(i - h / 2, switches, height=h, color=color, linewidth=0, zorder=3)
-            ax.barh(i + h / 2, flips, height=h, color=color, alpha=0.45, linewidth=0, zorder=3)
+            ax.barh(i, 100 * rates[0], height=0.7, color=st.PHASER_COLOR[phaser], linewidth=0, zorder=3)
             here += 1
         ax.set_title(st.PLATFORM_LABEL[platform], loc="left")
         ax.set_yticks(range(len(st.PHASERS)))
         ax.set_yticklabels([st.PHASER_LABEL[p] for p in st.PHASERS])
         ax.set_ylim(len(st.PHASERS) - 0.5, -0.5)
         ax.tick_params(axis="y", length=0)
-        ax.tick_params(axis="x", labelbottom=ax is axes[-1])
         ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
         ax.set_axisbelow(True)
         if not here:
@@ -421,15 +411,11 @@ def fig4(db, ctx, ref, caller="truth"):
         bars += here
     if not bars:
         plt.close(fig)
-        raise NoData("no switch/flip counts for %s at %d×" % (ref, depth))
+        raise NoData("no switch counts for %s at %d×" % (ref, depth))
 
     axes[0].set_xlim(left=0)
-    axes[-1].set_xlabel("Errors per 100 pairs of het SNPs, %d×" % depth)
-    top_legend(legend_ax, [
-        Patch(facecolor=st.MUTED, label="Switch error (wrong stretch)"),
-        Patch(facecolor=st.MUTED, alpha=0.45, label="Flip error (single site)"),
-    ], ncol=2, columnspacing=1.0)
-    return save(fig, ctx, "fig4_switch_vs_flip_%dx_%s" % (depth, ref))
+    axes[-1].set_xlabel("Switch errors per 100 pairs of het SNPs, %d×" % depth)
+    return save(fig, ctx, "fig4_switch_errors_%dx_%s" % (depth, ref))
 
 
 def figS1(db, ctx, ref, caller="truth"):
@@ -1316,7 +1302,9 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
         text = ("%+.1f%%" if abs(pct) < 10 else "%+.0f%%") % pct
         return text.replace("-", "\u2212")
     boxes = sum(len(boxes) for _, boxes in groups)
-    fig, ax = plt.subplots(figsize=((34 + 11 * boxes) * st.MM, 70 * st.MM),
+    # four boxes fit SMALL_WIDTH, so fig6 by platform is as narrow as fig7g
+    width = max(st.SMALL_WIDTH, 20 + 11 * boxes)
+    fig, ax = plt.subplots(figsize=(width * st.MM, 70 * st.MM),
                            constrained_layout=True)
     rng = np.random.RandomState(0)
     pos, ticks, tick_labels = 0, [], []
@@ -1351,7 +1339,7 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
         pos += 0.7 if g < len(groups) - 1 else 0
     ratio_axis(ax, all_ratios, label, limits)
     if title:
-        fig.suptitle(textwrap.fill(title, max(30, int((34 + 11 * boxes) / 1.9))))
+        fig.suptitle(textwrap.fill(title, max(30, int(width / 1.9))))
     ax.set_xticks(ticks)
     ax.set_xticklabels(tick_labels, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_xlim(-0.6, pos - 0.4)
