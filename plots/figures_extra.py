@@ -510,9 +510,7 @@ def fig7g(db, ctx, ref):
     ax.yaxis.set_minor_locator(NullLocator())
     ax.axhspan(1, yhi, color=st.MUTED, alpha=0.07, linewidth=0, zorder=0)
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
-    ax.text(0.02, 0.96, "%.0f%% of runs > 1; median ×%.2f" % (
-                100 * sum(y > 1 for y in ys_all) / len(ys_all), float(np.median(ys_all))),
-            transform=ax.transAxes, ha="left", va="top", color=st.INK)
+    ax.set_title("Comparison of haplotagging error rates using\ndifferent phase-block orientation strategies")
     ax.set_xlabel("Truth-tagged reads not assigned to their haplotype (%),\nSNP-oriented blocks")
     ax.set_ylabel("Fold increase in reads not assigned\n(anchor read vs SNP orientation)")
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
