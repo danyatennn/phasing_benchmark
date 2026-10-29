@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
-from matplotlib.ticker import FuncFormatter, LogLocator, NullLocator
+from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullLocator
 
 import style as st
 from data import NAN, ratio
@@ -388,7 +388,7 @@ def fig4(db, ctx, ref, caller="truth"):
     phaser. The phaser is named on the axis, so no legend."""
     depth = ctx.depth
     n = len(st.PLATFORMS)
-    fig, axes = plt.subplots(n, 1, sharex=True, figsize=(80 * st.MM, (10 + 19 * n) * st.MM),
+    fig, axes = plt.subplots(n, 1, sharex=True, figsize=(56 * st.MM, (12 + 19 * n) * st.MM),
                              constrained_layout=True)
     bars = 0
     for ax, platform in zip(axes, st.PLATFORMS):
@@ -414,7 +414,9 @@ def fig4(db, ctx, ref, caller="truth"):
         raise NoData("no switch counts for %s at %d×" % (ref, depth))
 
     axes[0].set_xlim(left=0)
-    axes[-1].set_xlabel("Switch errors per 100 pairs of het SNPs, %d×" % depth)
+    # a narrow axis: four ticks at most, so the labels do not touch
+    axes[0].xaxis.set_major_locator(MaxNLocator(4))
+    axes[-1].set_xlabel("Switch errors per 100 pairs\nof het SNPs, %d×" % depth)
     return save(fig, ctx, "fig4_switch_errors_%dx_%s" % (depth, ref))
 
 
