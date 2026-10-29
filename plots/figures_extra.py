@@ -472,8 +472,9 @@ def fig7g(db, ctx, ref):
     oriented by an anchor read. No difference is the dashed line at 1; over it
     the SNP orientation is better. y runs from 0.8 to 2, so the gap from 1
     shows; runs outside are left out."""
-    fig = plt.figure(figsize=(st.FULL_WIDTH * 0.6 * st.MM, 80 * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.15])
+    # narrow, about a third of the page: short labels, the legend in rows of 2-3
+    fig = plt.figure(figsize=(64 * st.MM, 84 * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.34])
     ax = fig.add_subplot(grid[0])
     legend_ax = fig.add_subplot(grid[1])
     legend_ax.axis("off")
@@ -491,7 +492,7 @@ def fig7g(db, ctx, ref):
                     if finite(snp) and finite(anchor) and snp > 0 and anchor > 0:
                         xs.append(100 * snp)
                         ys.append(anchor / snp)
-            ax.scatter(xs, ys, s=12, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
+            ax.scatter(xs, ys, s=8, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
                        alpha=0.8, edgecolor="white", linewidth=0.3, zorder=3)
             xs_all += xs
             ys_all += ys
@@ -509,18 +510,18 @@ def fig7g(db, ctx, ref):
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
     ax.yaxis.set_minor_locator(NullLocator())
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
-    ax.set_title("Comparison of haplotagging error rates using\ndifferent phase-block orientation strategies")
-    ax.set_xlabel("Truth-tagged reads not assigned to their haplotype (%),\nSNP-oriented blocks")
-    ax.set_ylabel("Fold increase in reads not assigned\n(anchor read vs SNP orientation)")
+    ax.set_title("Comparison of haplotagging error\nrates using different phase-block\norientation strategies")
+    ax.set_xlabel("Reads not on their haplotype (%),\nSNP orientation")
+    ax.set_ylabel("Fold increase,\nanchor read / SNP orientation")
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
-    first = legend_ax.legend(handles=platform_handles(line=False), loc="upper center", ncol=len(st.PLATFORMS),
-                             borderaxespad=0, handletextpad=0.2, columnspacing=1.0)
+    first = legend_ax.legend(handles=platform_handles(line=False), loc="upper center", ncol=2,
+                             borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
     legend_ax.add_artist(first)
     legend_ax.legend(handles=[Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
                                      markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS],
-                     loc="lower center", ncol=len(st.PHASERS), borderaxespad=0, handletextpad=0.2,
-                     columnspacing=1.0)
+                     loc="lower center", ncol=3, borderaxespad=0, handletextpad=0.2,
+                     columnspacing=0.8)
     return save(fig, ctx, "fig7g_anchor_vs_variant_recall_ratio_" + ref)
 
 
