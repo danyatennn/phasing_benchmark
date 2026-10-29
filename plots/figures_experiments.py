@@ -6,7 +6,8 @@ is computed and leaves the rest out, so it can be run again as runs finish.
 
 A  extra variants in the phaser input (bin/make_truth_variants.sh), 30x: the
    same phaser on the same cell with the GIAB truth het SNPs (pale bar) and
-   with the het indels added (solid bar; --inputs adds truthall, hatched).
+   with the het indels added (solid bar) and with every het variant (truthall,
+   hatched); --inputs truthindel leaves truthall out.
    Phasing is scored on the SNPs only, so a change is what the added variants
    do to the phase of the SNPs.
      figA1_switch_<ref>          switch error rate, chr1-22
@@ -34,7 +35,7 @@ HG002 files carry the reference only; another sample's carry its name too
 
   python plots/figures_experiments.py                        all there is
   python plots/figures_experiments.py --only A,B --png
-  python plots/figures_experiments.py --inputs "truthindel truthall"
+  python plots/figures_experiments.py --inputs truthindel
   python plots/figures_experiments.py --only C --asm-depth 50
 """
 
@@ -351,7 +352,7 @@ def main():
     parser.add_argument("--samples", default="", help="default: HG002 and samples/*")
     parser.add_argument("--refs", default=" ".join(st.REFERENCES),
                         help="references of HG002; the other samples are GRCh38 only")
-    parser.add_argument("--inputs", default="truthindel",
+    parser.add_argument("--inputs", default="truthindel truthall",
                         help="experiment A inputs set against the truth SNPs: truthindel, truthall")
     parser.add_argument("--asm-depth", type=int, default=30, choices=ASM_DEPTHS)
     parser.add_argument("--rules", default="auto_min2")
