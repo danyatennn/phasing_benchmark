@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Figures of the experiments beyond the main grid, one subfigure per PDF, as
 grouped bars (plots/bars.py): a panel per platform, a group per phaser, a bar
-per thing compared, its value written over it (and the change against the
-first bar of the group). Each figure draws what
+per thing compared, its value written over it. Each figure draws what
 is computed and leaves the rest out, so it can be run again as runs finish.
 
 A  extra variants in the phaser input (bin/make_truth_variants.sh), 30x: the
@@ -49,7 +48,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 import style as st
-from bars import bar, change_text, group_ticks, label_bar, offsets, scale_axes, value_text
+from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import Metrics, _read_table, num, ratio, sample_root
 from figures import (NoData, finite, n50_mb, panel_row, positive, read_precision_pct,
                      read_recall_pct, save, switch_pct, top_legend)
@@ -58,8 +57,8 @@ DEPTH = 30
 ASM_DEPTHS = [20, 30, 50]
 
 INPUTS_A = ["truth", "truthindel", "truthall"]
-INPUT_LABEL = {"truth": "GIAB truth SNPs", "truthindel": "SNPs + het indels",
-               "truthall": "SNPs + all het variants"}
+INPUT_LABEL = {"truth": "HET SNPs", "truthindel": "HET SNPs + HET Indels",
+               "truthall": "HET SNPs + HET Indels + multi-allelic variants"}
 
 ASSEMBLERS = ["hifiasm", "hifiasmtrio", "verkkotrio"]
 ASM_LABEL = {"hifiasm": "hifiasm", "hifiasmtrio": "hifiasm trio", "verkkotrio": "Verkko trio"}
@@ -107,11 +106,29 @@ def legend_patches(items):
                   label=label) for label, alpha, hatch in items]
 
 
-def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, note=None, show_change=True):
+def group_panels(platforms, height):
+    """A panel per platform, each as wide as its number of phaser groups, so
+    a group is as wide on PacBio (five phasers) as on ONT (four); one shared
+    y axis, the legend strip under the panels."""
+    widths = [len(phasers_on(p)) for p in platforms]
+    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, height * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, len(platforms), width_ratios=widths, height_ratios=[1, 0.1])
+    axes = []
+    for i in range(len(platforms)):
+        ax = fig.add_subplot(grid[0, i], sharey=axes[0] if axes else None)
+        if i:
+            ax.tick_params(labelleft=False)
+        axes.append(ax)
+    legend_ax = fig.add_subplot(grid[1, :])
+    legend_ax.axis("off")
+    return fig, legend_ax, axes
+
+
+def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend):
     """A panel per platform, a group per phaser; bars_of(platform, phaser) ->
     [(key, alpha, hatch)], the first the reference the others are compared with."""
     tag, ylabel, value, log = metric
-    fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 14)
+    fig, legend_ax, axes = group_panels(platforms, st.PANEL_HEIGHT + 14)
     drawn = []
     for ax, platform in zip(axes, platforms):
         phasers = phasers_on(platform)
@@ -120,20 +137,19 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, note=
             xs, w = offsets(len(group))
             values = [value(db, k) for k, _, _ in group]
             values = [positive(v) for v in values] if log else values
-            for i, (dx, v, (_, alpha, hatch)) in enumerate(zip(xs, values, group)):
+            for dx, v, (_, alpha, hatch) in zip(xs, values, group):
                 if bar(ax, x + dx, v, w, st.PHASER_COLOR[phaser], alpha, hatch) is None:
                     continue
                 drawn.append(v)
-                # the value, and on a compared bar its change against the first
-                change = change_text(v, values[0]) if i and show_change else ""
-                label_bar(ax, x + dx, v, w, value_text(v) + ("  " + change if change else ""))
+                # the value alone, no change against the first bar of the group
+                label_bar(ax, x + dx, v, w, value_text(v))
         group_ticks(ax, [st.PHASER_LABEL[p] for p in phasers])
         ax.set_title(st.PLATFORM_LABEL[platform])
     if not drawn:
         plt.close(fig)
         raise NoData("no %s values" % tag)
     scale_axes(axes, drawn, log, ylabel)
-    top_legend(legend_ax, legend_patches(legend), title=note)
+    top_legend(legend_ax, legend_patches(legend))
     return save(fig, ctx, name)
 
 
@@ -149,12 +165,8 @@ def figA_metric(db, ctx, sample, ref, number, metric, extra):
     bars_of = lambda p, ph: [(k, PALE if k[1] == "truth" else 1.0, hatch.get(k[1]))
                              for k in keys(p, ph)]
     legend = [(INPUT_LABEL["truth"], PALE, None)] + [(INPUT_LABEL[c], 1.0, hatch[c]) for c in extra]
-    # A1-A3: the values alone, without the change against the SNP input
-    show_change = number > 3
     return compare_groups(db, ctx, fig_name("figA%d_%s" % (number, metric[0]), sample, ref), ref,
-                          metric, platforms, bars_of, legend,
-                          "over the bars: value, and the change against the SNP input" if show_change
-                          else "over the bars: value", show_change=show_change)
+                          metric, platforms, bars_of, legend)
 
 
 def variants_table(root, sample):
@@ -180,7 +192,7 @@ def variant_bars(ctx, sample, ref, name, table, extra, value, ylabel, note=None,
     if not platforms:
         raise NoData("no variants_eval rows for %s %s" % (sample, ref))
     hatch = {"truthindel": None, "truthall": "////"}
-    fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 14)
+    fig, legend_ax, axes = group_panels(platforms, st.PANEL_HEIGHT + 14)
     xs, w = offsets(len(extra))
     drawn = []
     for ax, platform in zip(axes, platforms):
@@ -200,6 +212,7 @@ def variant_bars(ctx, sample, ref, name, table, extra, value, ylabel, note=None,
         plt.close(fig)
         raise NoData("no values for %s %s %s" % (name, sample, ref))
     scale_axes(axes, drawn, False, ylabel)
+    # a note that says how to read the bars (A6, A7) heads the legend under the panels
     top_legend(legend_ax, legend_patches([(INPUT_LABEL[c], 1.0, hatch[c]) for c in extra]), title=note)
     return save(fig, ctx, fig_name(name, sample, ref))
 
@@ -248,8 +261,7 @@ def figB_metric(db, ctx, sample, ref, number, metric):
     legend = [("phaser alone", PALE, None), ("+ MethPhaser", 1.0, None),
               ("LongPhase + 5mC (modcall)", 1.0, "////")]
     return compare_groups(db, ctx, fig_name("figB%d_%s" % (number, metric[0]), sample, ref), ref,
-                          metric, platforms, bars_of, legend,
-                          "over the bars: value, and the change against the phaser alone")
+                          metric, platforms, bars_of, legend)
 
 
 # ---------------------------------------------------------- C: assemblies
