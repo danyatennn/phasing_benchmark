@@ -383,8 +383,19 @@ def phaser_axis(ax):
 
 
 def fig4(db, ctx, ref, caller="truth"):
+    """A panel per platform, one under the other, sharing x; in each a pair of
+    horizontal bars per phaser, side by side, not stacked: switch errors (a
+    stretch phased the wrong way, dark) and flip errors (a single site, light)."""
     depth = ctx.depth
-    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=st.PANEL_HEIGHT + 6)
+    n = len(st.PLATFORMS)
+    fig = plt.figure(figsize=(88 * st.MM, (14 + 27 * n) * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(n + 1, 1, height_ratios=[1] * n + [0.12])
+    axes = []
+    for i in range(n):
+        axes.append(fig.add_subplot(grid[i, 0], sharex=axes[0] if axes else None))
+    legend_ax = fig.add_subplot(grid[n, 0])
+    legend_ax.axis("off")
+    h = 0.38
     bars = 0
     for ax, platform in zip(axes, st.PLATFORMS):
         here = 0
@@ -394,14 +405,17 @@ def fig4(db, ctx, ref, caller="truth"):
                 continue
             switches, flips = 100 * rates[0], 100 * rates[1]
             color = st.PHASER_COLOR[phaser]
-            ax.bar(i, switches, width=0.62, color=color, edgecolor="white",
-                   linewidth=0.8, zorder=3)
-            ax.bar(i, flips, bottom=switches, width=0.62, color=color, alpha=0.45,
-                   edgecolor="white", linewidth=0.8, zorder=3)
+            ax.barh(i - h / 2, switches, height=h, color=color, linewidth=0, zorder=3)
+            ax.barh(i + h / 2, flips, height=h, color=color, alpha=0.45, linewidth=0, zorder=3)
             here += 1
-        ax.set_title(st.PLATFORM_LABEL[platform])
-        phaser_axis(ax)
-        y_grid(ax)
+        ax.set_title(st.PLATFORM_LABEL[platform], loc="left")
+        ax.set_yticks(range(len(st.PHASERS)))
+        ax.set_yticklabels([st.PHASER_LABEL[p] for p in st.PHASERS])
+        ax.set_ylim(len(st.PHASERS) - 0.5, -0.5)
+        ax.tick_params(axis="y", length=0)
+        ax.tick_params(axis="x", labelbottom=ax is axes[-1])
+        ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
+        ax.set_axisbelow(True)
         if not here:
             empty_panel(ax)
         bars += here
@@ -409,12 +423,12 @@ def fig4(db, ctx, ref, caller="truth"):
         plt.close(fig)
         raise NoData("no switch/flip counts for %s at %d×" % (ref, depth))
 
-    axes[0].set_ylabel("Errors per 100 pairs\nof het SNPs, %d×" % depth)
-    axes[0].set_ylim(bottom=0)
+    axes[0].set_xlim(left=0)
+    axes[-1].set_xlabel("Errors per 100 pairs of het SNPs, %d×" % depth)
     top_legend(legend_ax, [
-        Patch(facecolor=st.MUTED, edgecolor="white", label="Switch error (wrong stretch)"),
-        Patch(facecolor=st.MUTED, alpha=0.45, edgecolor="white", label="Flip error (single site)"),
-    ])
+        Patch(facecolor=st.MUTED, label="Switch error (wrong stretch)"),
+        Patch(facecolor=st.MUTED, alpha=0.45, label="Flip error (single site)"),
+    ], ncol=2, columnspacing=1.0)
     return save(fig, ctx, "fig4_switch_vs_flip_%dx_%s" % (depth, ref))
 
 
