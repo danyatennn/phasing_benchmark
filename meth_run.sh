@@ -344,7 +344,12 @@ mp_one() (
   local lost unphased_lost
   lost="$(comm -23 <(phased_sites "${work}/base.vcf.gz") <(phased_sites "${out}.tmp") | wc -l)"
   [[ "${lost}" -eq 0 ]] || { rm -f "${out}.tmp" "${out}.tmp.tbi"; die "${name}: ${lost} phased variants of ${phaser} missing from MethPhaser's VCF, see ${logf}"; }
-  unphased_lost=$(( $("${BCFTOOLS}" index -n "${work}/base.vcf.gz") - $("${BCFTOOLS}" index -n "${out}.tmp") ))
+  # records counted by reading the file: bcftools index -n finds no index for
+  # a name that does not end in .vcf.gz, as <out>.tmp does
+  local n_base n_out
+  n_base="$("${BCFTOOLS}" view -H "${work}/base.vcf.gz" | wc -l)"
+  n_out="$("${BCFTOOLS}" view -H "${out}.tmp" | wc -l)"
+  unphased_lost=$(( n_base - n_out ))
   [[ "${unphased_lost}" -le 0 ]] || warn "${name}: ${unphased_lost} unphased records of ${phaser} not written by MethPhaser"
 
   # the haplotype MethPhaser gave each read (primary alignments only): HP is
