@@ -69,10 +69,14 @@ def f1(p, r):
 
 
 def calls(base, depth, problems):
-    """(ref, caller, platform, region) -> (P, R, F1), all checked"""
+    """(ref, caller, platform, region) -> (P, R, F1, truth, multi), the regions
+    of the table only, all checked. multi: positions the genome-wide count
+    left out of the truth because the caller wrote several records there
+    (plots/calls_fdr.py, a 1/2 site as two 0/1 records - longcallD)"""
     out = {}
+    wanted = {s_ for s_, _ in REGIONS}
 
-    def put(key, truth, emitted, shared, stored):
+    def put(key, truth, emitted, shared, stored, multi=0):
         if not (0 <= shared <= min(truth, emitted)) or not truth or not emitted:
             problems.append("calls %s: counts out of range (shared %g, emitted %g, truth %g)"
                             % (key, shared, emitted, truth))
@@ -83,10 +87,10 @@ def calls(base, depth, problems):
                 problems.append("calls %s: %s stored %.6f, recomputed %.6f" % (key, name, theirs, mine))
         if key in out:
             problems.append("calls %s: more than one row" % (key,))
-        out[key] = (100 * p, 100 * r, 100 * f1(p, r), truth)
+        out[key] = (100 * p, 100 * r, 100 * f1(p, r), truth, multi)
 
     for r in read(os.path.join(base, "metrics_strata_auto", "summary_calls_strata.tsv")):
-        if int(num(r.get("depth"))) != depth:
+        if int(num(r.get("depth"))) != depth or r["stratum"] not in wanted:
             continue
         tt, em, sh = num(r["truth_total"]), num(r["emitted"]), num(r["shared"])
         if num(r["fp"]) != em - sh or num(r["fn"]) != tt - sh:
@@ -102,7 +106,7 @@ def calls(base, depth, problems):
             problems.append("calls %s %s %s genome: fp/fn do not match the counts"
                             % (r["reference"], r["caller"], r["platform"]))
         put((r["reference"], r["caller"], r["platform"], "genome"), tt, em, sh,
-            (1 - num(r["fdr"]), 1 - num(r["fnr"]), math.nan))
+            (1 - num(r["fdr"]), 1 - num(r["fnr"]), math.nan), num(r["multi_record_positions"]))
     return out
 
 
@@ -212,16 +216,20 @@ def main():
     problems = []
     called = calls(base, args.depth, problems)
     tagged = haplotag(base, args.read_truth, args.phaser, args.depth, problems)
-    # the truth behind a calling cell must be the same for every caller
+    # the truth behind a calling cell must be the same for every caller, but for
+    # the positions a caller wrote several records at, left out on both sides
     totals = {}
     for (ref, c, p, s_), v in called.items():
-        totals.setdefault((ref, p, s_), set()).add(v[3])
+        totals.setdefault((ref, p, s_), []).append((c, v[3], v[4]))
     for k, t in totals.items():
-        if len(t) > 1:
-            problems.append("calls %s: truth het SNPs differ between callers: %s" % (k, sorted(t)))
+        full = max(n for _, n, _ in t)
+        for c, n, multi in t:
+            if full - n > multi:
+                problems.append("calls %s %s: %d truth het SNPs, the others %d (%d multi-record positions "
+                                "explain at most that many)" % (k, c, n, full, multi))
 
     values = {}
-    for k, (p, r, f, _) in called.items():
+    for k, (p, r, f, _, _) in called.items():
         values.setdefault(k, {}).update({"P": p, "R": r, "F1": f})
     for k, (hr, _) in tagged.items():
         values.setdefault(k, {})["HR"] = hr
