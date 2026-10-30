@@ -21,7 +21,12 @@
 #
 # MethPhaser works on autosomes only (random X inactivation), so its VCFs hold
 # chr1-22 - the metrics we report anyway. Every output is locked while being
-# written and kept once done, so several hosts can share the work.
+# written and kept once done, so several hosts can share the work. A MethPhaser
+# run that stopped (killed, or failed after meth_phaser_parallel) keeps its
+# tagged reads and finished chromosomes for the next attempt.
+#
+# meth_phaser_post_processing has two bugs that break every run here; they are
+# fixed in our copy by bin/patch_methphaser.py, run once before this script.
 #
 #   bash meth_run.sh                                 HG002, GRCh38, 30x
 #   REFERENCE_NAME=T2T bash meth_run.sh
@@ -54,6 +59,8 @@ SAMPLE_REGIONS=(chr1:100000000-100200000 chr6:40000000-40200000 chr11:80000000-8
 export PATH="${METHPHASER_DIR}:${METH_ENV_BIN}:${PATH}"
 MODKIT="${METH_ENV_BIN}/modkit"
 require_cmds meth_phaser_parallel meth_phaser_post_processing methphasing "${MODKIT}"
+grep -q "^def set_phase_set" "${METHPHASER_DIR}/meth_phaser_post_processing" \
+  || die "MethPhaser's post-processing is not patched: python3 bin/patch_methphaser.py ${METHPHASER_DIR}/meth_phaser_post_processing"
 mkdir -p "${PHASE_DIR}" "${METRICS_DIR}" "${METH_DIR}" "${LOGS_DIR}/meth" "${TMP_DIR}"
 
 # haplotag_part <vcf> <bam> <chrom> <out> - whatshap haplotag on one chromosome.
@@ -192,11 +199,25 @@ prep_reads() (
   "${SAMTOOLS}" index "${out}"
 )
 
+# mp_unfinished <work> - the chromosomes of blocks.gtf whose methphasing jobs
+# did not all finish, as "<chrom> <have> <want>". meth_phaser_parallel starts
+# the jobs without looking at how they end (subprocess.run). A job writes
+# methphaser/<chrom>/<first>_<last>.csv when it is done, and the jobs of a
+# chromosome are cut from its n GTF lines as meth_phaser_parallel does:
+# ceil(n / threads) blocks each, overlapping by one
+mp_unfinished() {
+  local work="$1" chrom want have
+  while read -r chrom want; do
+    # a chromosome with no jobs (a single block) has no directory: ls fails
+    have="$(ls "${work}/methphaser/${chrom}"/*.csv 2>/dev/null | wc -l || true)"
+    [[ "${have}" -eq "${want}" ]] || printf '%s %s %s\n' "${chrom}" "${have}" "${want}"
+  done < <(awk -F'\t' -v t="${METH_THREADS}" '{ n[$1]++ }
+      END { for (c in n) { bs = int((n[c] + t - 1) / t); print c, int((n[c] - 1 + bs - 1) / bs) } }' \
+      "${work}/blocks.gtf")
+}
+
 # mp_complete <work> <logf> - did every methphasing job of meth_phaser_parallel
-# finish? It starts them without looking at how they end (subprocess.run). A
-# job writes methphaser/<chrom>/<first>_<last>.csv when it is done, and the
-# jobs of a chromosome are cut from its n GTF lines as meth_phaser_parallel
-# does: ceil(n / threads) blocks each, overlapping by one
+# finish?
 mp_complete() {
   local work="$1" logf="$2" chrom want have ok=0 crashed
   # a traceback from multiprocessing's exit clean-up is not a crash: its
@@ -209,14 +230,10 @@ mp_complete() {
     warn "$(basename "${work}"): ${crashed} methphasing jobs crashed, see ${logf}"
     ok=1
   fi
-  while read -r chrom want; do
-    have="$(ls "${work}/methphaser/${chrom}"/*.csv 2>/dev/null | wc -l)"
-    [[ "${have}" -eq "${want}" ]] && continue
+  while read -r chrom have want; do
     warn "$(basename "${work}") ${chrom}: ${have} of ${want} methphasing jobs wrote a result"
     ok=1
-  done < <(awk -F'\t' -v t="${METH_THREADS}" '{ n[$1]++ }
-      END { for (c in n) { bs = int((n[c] + t - 1) / t); print c, int((n[c] - 1 + bs - 1) / bs) } }' \
-      "${work}/blocks.gtf")
+  done < <(mp_unfinished "${work}")
   return "${ok}"
 }
 
@@ -242,15 +259,19 @@ mp_one() (
   local logf="${LOGS_DIR}/meth/${name}.log"
   local tagged="${work}/tagged.bam"
   # the tagged reads of an earlier attempt are kept if they are complete (the
-  # index is written last) and newer than the phaser's VCF and the reads
+  # index is written last) and newer than the phaser's VCF and the reads, and
+  # with them MethPhaser's tables (methphaser/), made from these very reads: a
+  # chromosome whose jobs all finished is not run again
   local reuse=""
   [[ -s "${tagged}.bai" ]] && newer_than "${tagged}" "${base}" && newer_than "${tagged}" "${reads}" && reuse=1
   if [[ -n "${reuse}" ]]; then
-    find "${work}" -mindepth 1 -maxdepth 1 ! -name tagged.bam ! -name tagged.bam.bai -exec rm -rf {} +
+    find "${work}" -mindepth 1 -maxdepth 1 ! -name tagged.bam ! -name tagged.bam.bai ! -name methphaser -exec rm -rf {} +
   else
     rm -rf "${work}"
     mkdir -p "${work}"
   fi
+  # the log of the earlier attempt goes aside: mp_complete reads this one
+  [[ -s "${logf}" ]] && mv -f "${logf}" "${logf}.prev"
   : >"${logf}"
 
   "${BCFTOOLS}" view -r "$(IFS=,; echo "${CHROMS[*]}")" -Oz -o "${work}/base.vcf.gz" "${base}"
@@ -285,10 +306,23 @@ mp_one() (
   "${WHATSHAP}" stats --sample "${SAMPLE}" --gtf "${work}/blocks.gtf" "${work}/base.vcf.gz" >>"${logf}" 2>&1 \
     || die "whatshap stats --gtf failed for ${name}, see ${logf}"
 
-  log "${name}: meth_phaser_parallel"
-  meth_phaser_parallel -b "${work}/tagged.bam" -r "${REF}" -g "${work}/blocks.gtf" \
-      -vc "${work}/base.vcf.gz" -t "${METH_THREADS}" -o "${work}/methphaser" >>"${logf}" 2>&1 \
-    || die "meth_phaser_parallel failed for ${name}, see ${logf}"
+  # the chromosomes an earlier attempt did not finish, every one on the first.
+  # meth_phaser_parallel cuts each chromosome into jobs by its own GTF lines
+  # (methphasing -m <chrom> -n <first>,<last> counts within the chromosome), so
+  # given only their lines it runs the same jobs; what they left is removed
+  local todo c
+  todo="$(mp_unfinished "${work}" | cut -d' ' -f1)"
+  if [[ -z "${todo}" ]]; then
+    log "${name}: every methphasing job of an earlier attempt finished"
+  else
+    for c in ${todo}; do rm -rf "${work}/methphaser/${c}" "${work}/methphaser/${c}_read_assignment"; done
+    awk -F'\t' 'NR == FNR { want[$1]; next } $1 in want' <(printf '%s\n' ${todo}) "${work}/blocks.gtf" \
+      >"${work}/blocks.todo.gtf"
+    log "${name}: meth_phaser_parallel on $(wc -w <<<"${todo}") chromosomes"
+    meth_phaser_parallel -b "${work}/tagged.bam" -r "${REF}" -g "${work}/blocks.todo.gtf" \
+        -vc "${work}/base.vcf.gz" -t "${METH_THREADS}" -o "${work}/methphaser" >>"${logf}" 2>&1 \
+      || die "meth_phaser_parallel failed for ${name}, see ${logf}"
+  fi
   mp_complete "${work}" "${logf}" || die "${name}: MethPhaser did not finish, see ${logf}"
   log "${name}: meth_phaser_post_processing"
   meth_phaser_post_processing -ib "${work}/tagged.bam" -if "${work}/methphaser" \
