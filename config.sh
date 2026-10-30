@@ -97,6 +97,12 @@ SING="/autofs/bal33/zxzheng/env/miniconda2/envs/singularity-env/bin/singularity"
 CLAIR3_SIF="${PROJECT_ROOT}/clair3_gpu.sif"
 CLAIR3_THREADS="${CLAIR3_THREADS:-32}"
 
+# T2T-CHM13v2.0, the soft-masked analysis set, in a copy of our own: the one
+# data_config_germline.sh names (/autofs/bal19/lchen/data/chm13/ref/) is gone
+# since 30.10.2026. Downloaded from the T2T consortium's analysis set
+# (human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz)
+REF_CHM13="${PROJECT_ROOT}/ref/chm13v2.0.fa"
+
 if [[ "${REFERENCE_NAME}" == "GRCh38" ]]; then
   REF="${REF_GRCH38}"
   CONFIDENT_BED="${CONFIDENT_BED:-${HG002_GRCH38_V5Q_BED}}"
