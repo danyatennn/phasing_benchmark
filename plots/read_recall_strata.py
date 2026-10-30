@@ -32,10 +32,15 @@ reads on one reference only.
 
 Block orientation (--orient): the label H1/H2 of a block is arbitrary, so it is
 matched to the truth first.
-  snps   majority of the block's SNPs against the truth VCF (readacc_run.sh)
+  snps   (default) majority of the block's SNPs against the truth VCF of the
+         runs' reference, as readacc_run.sh. For matpat and yak the parental
+         label is first put on the truth's haplotypes per chromosome
+         (--truth-haplotags, as readacc_truths.sh); a block with no truth SNP
+         leaves its reads unoriented.
   reads  majority of the other truth-labelled reads tagged in the block (the
-         read itself left out, so it cannot vote for itself); a tie, or no
-         other labelled read, leaves the read unoriented. Uses no VCF.
+         read itself left out). Optimistic: the larger side of every block
+         counts as right, so a block cannot lose more than about half its
+         reads. Kept for comparison only.
 
 One line per run x region (metrics_reads/<run>.recall_strata.tsv):
   reference sample caller platform depth phaser stratum truth_tagged
@@ -88,8 +93,10 @@ def main():
     ap.add_argument("--truth-alleles", required=True, help="reads/<cell>_truth.reads.tsv.gz")
     ap.add_argument("--truth-tags", required=True, help="the labels, as --truth-source says")
     ap.add_argument("--truth-source", choices=["truthtags", "matpat", "yak"], default="truthtags")
-    ap.add_argument("--orient", choices=["snps", "reads"], default=None,
-                    help="default: snps for truthtags, reads for matpat and yak")
+    ap.add_argument("--orient", choices=["snps", "reads"], default="snps")
+    ap.add_argument("--truth-haplotags", default=None,
+                    help="matpat, yak with --orient snps: whatshap haplotag list against the truth VCF "
+                         "of the runs' reference (<cell>_truthtags.tsv), to put PAT/MAT on its haplotypes")
     ap.add_argument("--truth-vcf", required=True, help="read with --orient snps only")
     ap.add_argument("--stratum", action="append", default=[], help="name=bed, repeatable")
     ap.add_argument("--min-snps", type=int, default=2, help="phased het SNPs of the run's block")
@@ -99,7 +106,7 @@ def main():
     ap.add_argument("--jobs", required=True)
     args = ap.parse_args()
 
-    orient = args.orient or ("snps" if args.truth_source == "truthtags" else "reads")
+    orient = args.orient
     if args.truth_source == "truthtags":
         truth = truth_labels(args.truth_tags, "truthtags", autosomes_only=True)
     else:
@@ -142,6 +149,28 @@ def main():
           file=sys.stderr)
     del snps, keep
 
+    # parental labels oriented by SNPs: the blocks are matched to the truth VCF,
+    # so PAT/MAT must be put on its haplotypes first - on each chromosome of the
+    # runs' reference, PAT is H1 or H2 as most reads labelled by both say (the
+    # truth keeps one parent on one side of a chromosome), as readacc_truths.sh
+    swap = None
+    if orient == "snps" and args.truth_source != "truthtags":
+        if not args.truth_haplotags:
+            sys.exit("--truth-haplotags is needed for %s labels with --orient snps" % args.truth_source)
+        both = {}
+        for r, (hap, _, c) in haplotag_list(args.truth_haplotags, autosomes_only=True).items():
+            if hap in ("H1", "H2") and r in truth:
+                n = both.setdefault(c, [0, 0])
+                n[0 if (0 if hap == "H1" else 1) == truth[r] else 1] += 1
+        swap = {}
+        for c in sorted(both):
+            same, opp = both[c]
+            swap[c] = opp > same
+            agree = max(same, opp) / (same + opp)
+            print("  %s: PAT=%s, %d reads labelled by both, %.2f%% agree%s"
+                  % (c, "H2" if swap[c] else "H1", same + opp, 100 * agree,
+                     "" if agree >= 0.9 else "  <- check the labels"), file=sys.stderr)
+
     truth_gt = {}
     if orient == "snps":
         truth_gt = {(c, p, ref, alt): gt for c, p, ref, alt, gt, ps in
@@ -172,6 +201,13 @@ def main():
             if tagged:
                 if orient == "snps":
                     f = flip.get((t[2], t[1]))
+                    if swap is not None:
+                        # the parental label on the truth's haplotypes of this chromosome
+                        s_ = swap.get(t[2])
+                        if s_ is None:
+                            f = None
+                        else:
+                            lab = truth[r] ^ s_
                 else:
                     # the block's orientation from the other labelled reads
                     same, opp = votes[(t[2], t[1])]

@@ -89,8 +89,8 @@ def path_of(ctx, *parts):
 
 # --read-truth matpat / yak: R15, R16 and R18 from bin/read_recall_strata.sh run
 # with READ_TRUTH=<truth> - read labels that depend on no reference, the same
-# reads, chr1-22 and regions (T2T) for both references, blocks oriented by the
-# other labelled reads
+# reads, chr1-22 and regions (T2T) for both references, blocks oriented by
+# their SNPs against each reference's truth VCF
 READ_TRUTH_LABEL = {"matpat": "Q100 parental-copy truth", "yak": "parental k-mer truth"}
 
 
@@ -962,7 +962,7 @@ def fig_r15(ctx):
                 val[("precision",) + k] = 100 * cr / cp
             if tt:
                 val[("recall",) + k] = 100 * cr / tt
-        how, sfx = "%s, blocks oriented by labelled reads" % READ_TRUTH_LABEL[ctx.read_truth], \
+        how, sfx = "%s, blocks oriented by their SNPs" % READ_TRUTH_LABEL[ctx.read_truth], \
             "_" + ctx.read_truth
     else:
         rows = [r for r in table(path_of(ctx, "metrics", "summary_readacc_auto_min2.tsv"))

@@ -160,11 +160,11 @@ def table(ref, platforms, values, regions, callers, args):
         "\\setlength{\\belowcaptionskip}{6pt}",
         "\\caption{Het SNP calling and read haplotagging across genomic regions, %s, %d$\\times$. "
         "P, R, F1: precision, recall and F1 (\\%%) of the caller's biallelic het SNPs against the GIAB "
-        "truth inside its confident regions. HR: haplotag recall (\\%%), the share of labelled reads that "
+        "truth inside the benchmark regions. HR: haplotag recall (\\%%), the share of labelled reads that "
         "%s, phasing the caller's SNPs, puts on their true parental haplotype; reads labelled by %s, "
         "primary alignments present on both references with $\\geq$2 truth het SNPs, assigned to regions "
         "by their T2T-CHM13 alignment, so each platform has the same reads on both references. GIAB truth: "
-        "the phaser given the truth SNPs (upper bound). Best caller per region, platform and metric in "
+        "the phaser given the truth SNPs. Best caller per region, platform and metric in "
         "bold.}" % (
             st.REFERENCE_LABEL[ref], args.depth, st.PHASER_LABEL[args.phaser],
             TRUTH_TEX[args.read_truth]),

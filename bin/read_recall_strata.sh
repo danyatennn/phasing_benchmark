@@ -15,8 +15,10 @@
 # matpat and yak depend on no reference: the reads are the same on both, so
 # every run, GRCh38 or T2T, is scored on the reads, labels, chr1-22, het SNP
 # count and strata of REGION_REF (T2T by default) - the same denominator and
-# the same regions on both references. Blocks are then oriented by the other
-# labelled reads, not by the truth VCF (plots/read_recall_strata.py --orient).
+# the same regions on both references. Blocks are oriented by their SNPs
+# against the truth VCF of the run's reference, as readacc_run.sh; the parental
+# labels are put on its haplotypes per chromosome through the cell's truth
+# haplotag list, as readacc_truths.sh.
 #
 # Needs per cell: the read table (bin/read_tables.sh), the truth allele matrix
 # (PHASING_CALLERS=truth bash bin/allele_matrix.sh), the haplotag lists and
@@ -59,9 +61,12 @@ recall_one() {
   local table="${READS_DIR}/${rcell}.reads.tsv.gz"
   local alleles="${READS_DIR}/${rcell}_truth.reads.tsv.gz"
   local truth_tags="${METRICS_DIR}/$(vcf_name "${platform}" "${depth}" truthtags).tsv"
-  # parental labels: only reads with a primary alignment in the cell on both references
-  local require="" t
+  # parental labels: only reads with a primary alignment in the cell on both
+  # references; the truth haplotag list of this cell maps PAT/MAT on the truth
+  local require="" t ref_tags="${truth_tags}"
   if [[ "${READ_TRUTH}" != truthtags ]]; then
+    [[ -s "${ref_tags}" ]] || { warn "${cell}: missing ${ref_tags}"; return 0; }
+    require="--truth-haplotags ${ref_tags}"
     truth_tags="${READS_DIR}/${rcell}.${READ_TRUTH}.tsv.gz"
     for t in GRCh38 T2T; do
       t="${READS_DIR}/$(bam_key "${platform}" "${t}" "${depth}").reads.tsv.gz"
@@ -83,7 +88,8 @@ recall_one() {
     out="${METRICS_READS_DIR}/${name}.recall_strata${RECALL_SFX}.tsv"
     [[ -s "${tags}" && -s "${vcf}" && ! -d "${METRICS_DIR}/${name}.row.tsv.lock" ]] || continue
     if newer_than "${out}" "${tags}" && newer_than "${out}" "${vcf}" && newer_than "${out}" "${table}" \
-        && newer_than "${out}" "${truth_tags}" && newer_than "${out}" "${alleles}"; then
+        && newer_than "${out}" "${truth_tags}" && newer_than "${out}" "${alleles}" \
+        && newer_than "${out}" "${ref_tags}" && ! grep -q $'\treads$' "${out}"; then
       continue
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${REFERENCE_NAME}" "${SAMPLE}" \
