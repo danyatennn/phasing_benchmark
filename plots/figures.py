@@ -1429,14 +1429,15 @@ def fig6c(db, ctx):
                              recall_pct, "Correctly phased truth het SNPs (%)", log=False)
 
 
-def matpat_recall(db):
+def matpat_recall(db, sfx="_matpat"):
     """read recall against the Q100 parental-copy labels, genome-wide, by
     (reference, caller, platform, depth, phaser): metrics_reads/
-    summary_recall_strata_matpat.tsv of READ_TRUTH=matpat bin/read_recall_strata.sh,
-    as figR18 ..._matpat. The same reads on both references - primary on
-    GRCh38 and on T2T, a parental label, 2 truth het SNPs or more - so the
-    denominator is the same for both; recall = correct / truth_tagged."""
-    path = os.path.join(db.sample_root, "metrics_reads", "summary_recall_strata_matpat.tsv")
+    summary_recall_strata<sfx>.tsv of READ_TRUTH=matpat bin/read_recall_strata.sh,
+    as figR18 ..._matpat. By default the same reads on both references - primary
+    on GRCh38 and on T2T, a parental label, 2 truth het SNPs or more - so the
+    denominator is the same for both; recall = correct / truth_tagged. Other
+    settings of the script write other suffixes (_matpat_own_min0, ...)."""
+    path = os.path.join(db.sample_root, "metrics_reads", "summary_recall_strata%s.tsv" % sfx)
     out = {}
     if not os.path.exists(path):
         return out

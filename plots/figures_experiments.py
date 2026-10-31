@@ -23,8 +23,11 @@ B  methylation (meth_run.sh), truth input, 30x: each phaser alone (pale), with
      figB1_switch_<ref>, figB2_hamming_<ref>, figB3_ng50_<ref>,
      figB4_read_recall_matpat_<ref>   read haplotagging recall: of the chr1-22
                                       reads the matpat truth labels (alignment to
-                                      the Q100 parental copies, bin/readacc_truths.sh),
-                                      the share tagged to their haplotype
+                                      the Q100 parental copies), the share tagged
+                                      to their haplotype; the reads of the run's
+                                      own reference, no truth SNP minimum
+                                      (READ_RECALL_COMMON=0 READ_RECALL_MIN_SNPS=0
+                                      READ_TRUTH=matpat bin/read_recall_strata.sh)
 C  assemblies (dipcall_run.sh) next to the read-based phasers on the truth
    input, one coverage (--asm-depth, 30x). An assembly brings its own SNPs
    (dipcall, inside dip.bed). hifiasm without parents is shown for the switch
@@ -55,7 +58,7 @@ from matplotlib.patches import Patch
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import Metrics, _read_table, num, ratio, sample_root
-from figures import (NoData, finite, n50_mb, panel_row, positive, read_precision_pct,
+from figures import (NoData, finite, matpat_recall, n50_mb, panel_row, positive, read_precision_pct,
                      read_recall_pct, save, switch_pct, top_legend)
 
 DEPTH = 30
@@ -97,9 +100,15 @@ METRICS = [
 READS_WRONG = ("reads_wrong", "Tagged reads on the\nwrong haplotype (%)", reads_wrong_pct, False)
 
 
+B_RECALL_SFX = "_matpat_own_min0"
+_b_recall = {}
+
+
 def read_recall_matpat_pct(db, key):
     """reads tagged to their haplotype / reads the matpat truth labels"""
-    return 100 * db.get(key, "read_recall_var_matpat")
+    if db.sample_root not in _b_recall:
+        _b_recall[db.sample_root] = matpat_recall(db, B_RECALL_SFX)
+    return _b_recall[db.sample_root].get(key, float("nan"))
 
 
 # B scores reads against the Q100 parental copies, not the truth VCF's tags

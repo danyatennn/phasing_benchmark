@@ -15,7 +15,9 @@
 # matpat and yak depend on no reference: the reads are the same on both, so
 # every run, GRCh38 or T2T, is scored on the reads, labels, chr1-22, het SNP
 # count and strata of REGION_REF (T2T by default) - the same denominator and
-# the same regions on both references. Blocks are oriented by their SNPs
+# the same regions on both references. READ_RECALL_COMMON=0 drops that: each
+# run is scored on the reads, labels and strata of its own reference (for an
+# experiment that does not compare the references). Blocks are oriented by their SNPs
 # against the truth VCF of the run's reference, as readacc_run.sh; the parental
 # labels are put on its haplotypes per chromosome through the cell's truth
 # haplotag list, as readacc_truths.sh.
@@ -29,6 +31,14 @@
 #   PHASING_DEPTHS=30 bash bin/read_recall_strata.sh
 #   PHASING_DEPTHS=30 REFERENCE_NAME=T2T bash bin/read_recall_strata.sh
 #   PHASING_DEPTHS=30 READ_TRUTH=matpat REFERENCE_NAME=GRCh38 bash bin/read_recall_strata.sh
+#   READ_RECALL_COMMON=0 READ_RECALL_MIN_SNPS=0 READ_TRUTH=matpat PHASING_DEPTHS=30 bash bin/read_recall_strata.sh
+#
+# READ_RECALL_MIN_SNPS  truth het SNPs a read must cover to count (2; 0 = every
+#                       labelled read on chr1-22)
+# READ_RECALL_COMMON    matpat, yak: 1 (default) the same reads on both
+#                       references, see above; 0 the reads of the run's own reference
+# A setting other than the default goes to its own files: _own for
+# READ_RECALL_COMMON=0, _min<N> for READ_RECALL_MIN_SNPS=N, after the truth's sfx.
 
 set -euo pipefail
 
@@ -38,12 +48,21 @@ source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
 RECALL_JOBS="${RECALL_JOBS:-4}"
 READ_RECALL_MIN_SNPS="${READ_RECALL_MIN_SNPS:-2}"
+READ_RECALL_COMMON="${READ_RECALL_COMMON:-1}"
 READ_TRUTH="${READ_TRUTH:-truthtags}"
 case "${READ_TRUTH}" in
   truthtags)  REGION_REF="${REFERENCE_NAME}"; RECALL_SFX="" ;;
   matpat|yak) REGION_REF="${REGION_REF:-T2T}"; RECALL_SFX="_${READ_TRUTH}" ;;
   *) die "READ_TRUTH must be truthtags, matpat or yak, not ${READ_TRUTH}" ;;
 esac
+[[ "${READ_RECALL_COMMON}" == 0 || "${READ_RECALL_COMMON}" == 1 ]] \
+  || die "READ_RECALL_COMMON must be 0 or 1, not ${READ_RECALL_COMMON}"
+[[ "${READ_RECALL_MIN_SNPS}" =~ ^[0-9]+$ ]] || die "READ_RECALL_MIN_SNPS must be a number, not ${READ_RECALL_MIN_SNPS}"
+if [[ "${READ_TRUTH}" != truthtags && "${READ_RECALL_COMMON}" == 0 ]]; then
+  REGION_REF="${REFERENCE_NAME}"
+  RECALL_SFX="${RECALL_SFX}_own"
+fi
+[[ "${READ_RECALL_MIN_SNPS}" == 2 ]] || RECALL_SFX="${RECALL_SFX}_min${READ_RECALL_MIN_SNPS}"
 mkdir -p "${METRICS_READS_DIR}" "${TMP_DIR}" "${LOGS_DIR}/reads"
 
 STRATA_ARGS=""
@@ -62,17 +81,20 @@ recall_one() {
   local alleles="${READS_DIR}/${rcell}_truth.reads.tsv.gz"
   local truth_tags="${METRICS_DIR}/$(vcf_name "${platform}" "${depth}" truthtags).tsv"
   # parental labels: only reads with a primary alignment in the cell on both
-  # references; the truth haplotag list of this cell maps PAT/MAT on the truth
+  # references (READ_RECALL_COMMON=1); the truth haplotag list of this cell
+  # maps PAT/MAT on the truth
   local require="" t ref_tags="${truth_tags}"
   if [[ "${READ_TRUTH}" != truthtags ]]; then
     [[ -s "${ref_tags}" ]] || { warn "${cell}: missing ${ref_tags}"; return 0; }
     require="--truth-haplotags ${ref_tags}"
     truth_tags="${READS_DIR}/${rcell}.${READ_TRUTH}.tsv.gz"
-    for t in GRCh38 T2T; do
-      t="${READS_DIR}/$(bam_key "${platform}" "${t}" "${depth}").reads.tsv.gz"
-      [[ -s "${t}" ]] || { warn "${cell}: missing ${t}"; return 0; }
-      require="${require} --require-reads ${t}"
-    done
+    if [[ "${READ_RECALL_COMMON}" == 1 ]]; then
+      for t in GRCh38 T2T; do
+        t="${READS_DIR}/$(bam_key "${platform}" "${t}" "${depth}").reads.tsv.gz"
+        [[ -s "${t}" ]] || { warn "${cell}: missing ${t}"; return 0; }
+        require="${require} --require-reads ${t}"
+      done
+    fi
   fi
   for f in "${table}" "${alleles}" "${truth_tags}"; do
     [[ -s "${f}" ]] || { warn "${cell}: missing ${f}"; return 0; }
@@ -115,9 +137,9 @@ recall_one() {
 PHASER_LIST="${PHASERS[*]}"
 export -f recall_one bam_key vcf_name newer_than phaser_applies stratum_bed log warn die
 export METRICS_DIR METRICS_READS_DIR PHASE_DIR READS_DIR LOGS_DIR TMP_DIR REFERENCE_NAME \
-       REGION_NAME SAMPLE TRUTH_PHASED STRATA_ARGS READACC_MIN_SNPS READ_RECALL_MIN_SNPS READ_TRUTH REGION_REF RECALL_SFX PREPARED_DIR PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
+       REGION_NAME SAMPLE TRUTH_PHASED STRATA_ARGS READACC_MIN_SNPS READ_RECALL_MIN_SNPS READ_RECALL_COMMON READ_TRUTH REGION_REF RECALL_SFX PREPARED_DIR PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
 
-log "${SAMPLE} ${REFERENCE_NAME}: read recall per region, ${READ_TRUTH} labels, ${REGION_REF} reads and regions, for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}"
+log "${SAMPLE} ${REFERENCE_NAME}: read recall per region, ${READ_TRUTH} labels, ${REGION_REF} reads and regions, reads with >= ${READ_RECALL_MIN_SNPS} truth het SNPs (${RECALL_SFX:-default} files), for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}"
 "${PARALLEL}" -j "${RECALL_JOBS}" recall_one {1} {2} {3} \
     ::: "${CALLERS[@]}" ::: "${PLATFORMS[@]}" ::: "${DEPTHS[@]}" || true
 
