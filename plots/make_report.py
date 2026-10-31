@@ -34,12 +34,11 @@ FIGURES = [
      "Same runs as above. NG50 over the length of chr1-22. Log scale; higher is better."),
     ("fig1c_truth_phased_by_platform", True, "Truth het SNPs phased",
      "Same runs. Share of the benchmark het SNPs that are in a phase block of two or more SNPs."),
-    ("fig3_accuracy_vs_contiguity", True, "Accuracy against contiguity",
+    ("fig3_accuracy_vs_contiguity", False, "Accuracy against contiguity",
      TRUTH_INPUT + " One line per phaser, from 10x (small marker) to 50x (large marker). The "
      "switch error rate axis is inverted, so the top right corner is best."),
-    ("fig4_switch_vs_flip_30x", True, "Switch and flip errors at 30x",
-     TRUTH_INPUT + " Dark: switch errors (a stretch phased the wrong way). Light: flip errors "
-     "(a single site phased the wrong way). Per 100 assessed pairs of SNPs."),
+    ("fig4_switch_errors_30x", True, "Switch errors at 30x",
+     TRUTH_INPUT + " Switch errors (a stretch phased the wrong way) per 100 assessed pairs of SNPs."),
     ("figS1_switch_rate_per_chromosome_30x", True, "Switch error rate per autosome at 30x",
      TRUTH_INPUT + " Box: the 22 autosomes; points: single autosomes. Autosomes without a "
      "switch error are drawn on the line labelled 0."),
@@ -69,7 +68,8 @@ FIGURES = [
     ("fig6a_reference_switch_rate_ratio_by_technology", False, "GRCh38 against T2T-CHM13: switch error rate ratio",
      "Each point: one run (same platform, coverage and phaser) on both references, truth input; "
      "a box pools the five coverages. Box: interquartile range; black line: median; number "
-     "above: the median change on T2T-CHM13 in percent; grey band: within 10%. Reads were aligned "
+     "over the box: the median change on T2T-CHM13 in percent; grey band: within 10%; the y "
+     "axis is linear, as far below 1 as above. Reads were aligned "
      "differently on the two references (provider alignments on GRCh38, minimap2 2.31 on "
      "T2T-CHM13)."),
     ("fig6b_reference_block_ng50_scatter_by_platform", False, "GRCh38 against T2T-CHM13: phase block NG50",
@@ -78,6 +78,16 @@ FIGURES = [
      "As above, for NG50."),
     ("fig6c_reference_recall_phased", False, "GRCh38 against T2T-CHM13: truth het SNPs phased correctly",
      "Same run on both references, truth input. Dashed line: equal on both."),
+    ("fig6d_reference_read_recall_matpat_scatter_by_platform", False, "GRCh38 against T2T-CHM13: haplotagging read recall",
+     "Same run on both references, truth input. Read recall against the Q100 parental-copy truth "
+     "(matpat): reads on their parental haplotype, of the reads with a parental label, a primary "
+     "alignment on both GRCh38 and T2T-CHM13 and 2 truth het SNPs or more - the same reads on "
+     "both references. Blocks oriented by the other labelled reads. Dashed line: equal on both."),
+    ("fig6d_reference_read_recall_matpat_ratio_by_technology", False, "GRCh38 against T2T-CHM13: read recall ratio",
+     "As the switch error rate ratio, for this read recall."),
+    ("fig6e_reference_read_recall_matpat_by_platform", False, "GRCh38 against T2T-CHM13: read recall by platform",
+     "Every run on the truth input, read recall on the Q100 parental labels on GRCh38 (x) and T2T-CHM13 (y). "
+     "Legend: the mean of T2T-CHM13 minus GRCh38 over the runs of each platform, in percentage points."),
     ("fig7a_bases_tagged", True, "Read bases assigned a haplotype",
      TRUTH_INPUT + " Share of read bases on chr1-22 in reads tagged in a phase block of two or "
      "more SNPs."),
@@ -92,6 +102,12 @@ FIGURES = [
     ("fig7d_anchor_vs_variant_orientation", True, "Two ways to orient phase blocks",
      "Every run. Reads on the wrong haplotype with blocks oriented by their SNPs (x) and by an "
      "anchor read (y). Dashed line: equal."),
+    ("fig7g_anchor_vs_variant_recall_ratio", True,
+     "Comparison of haplotagging error rates using different phase-block orientation strategies",
+     "Every run. x: truth-tagged reads not assigned to their haplotype (1 - read recall) with phase "
+     "blocks oriented by their SNPs; y: how many times more there are with blocks oriented by an "
+     "anchor read (the longest read of the block with a truth label). Dashed line: no difference. "
+     "y from 0.8 to 2, runs outside it are not drawn."),
     ("fig8_switch_rate_by_stratum_30x", True, "Switch error rate by genomic context, 30x",
      TRUTH_INPUT + " GIAB stratifications v3.6, inside the benchmark regions, chr1-22."),
 ]

@@ -60,7 +60,7 @@ def label_bar(ax, x, value, width, text=None):
     below = value < 0
     ax.annotate(text, (x, value), xytext=(0, -1.5 if below else 1.5), textcoords="offset points",
                 ha="center", va="top" if below else "bottom", rotation=0 if upright else 90,
-                fontsize=st.FONT_SIZE - 2, color=st.INK, zorder=4, annotation_clip=False)
+                fontsize=st.SMALL_FONT, color=st.INK, zorder=4, annotation_clip=False)
 
 
 def group_ticks(ax, labels):

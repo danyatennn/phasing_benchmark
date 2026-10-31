@@ -40,6 +40,7 @@ import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes
 from data import NAN, ratio
 from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks, panel_row,
+                     panel_size, paper_title,
                      platform_groups, platform_phaser_rows,
                      phaser_axis, phaser_handles, platform_handles, positive, save,
                      short_number, strata_heatmap, stratum_label, top_legend, y_grid)
@@ -419,14 +420,19 @@ def fig11c(db, ctx, ref, phaser="whatshap"):
 
 
 def fig7d(db, ctx, ref):
-    """Every run, read precision with blocks oriented by an anchor read against
-    by their SNPs (both with blocks of two SNPs or more, chr1-22)."""
-    fig = plt.figure(figsize=(118 * st.MM, 72 * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(1, 2, width_ratios=[1, 0.42])
-    ax = fig.add_subplot(grid[0, 0])
-    legend_ax = fig.add_subplot(grid[0, 1])
+    """Every run, reads on the wrong haplotype (1 - read precision)
+    with blocks oriented by an anchor read against by their SNPs (both with
+    blocks of two SNPs or more, chr1-22). Colour is the platform, shape the
+    phaser. Each platform's legend entry carries the median over its runs of
+    anchor / SNP: how many times more reads the anchor read puts on the wrong
+    haplotype. Every run sits over the diagonal, so the platforms go into the
+    empty corner under it and the phasers under the plot."""
+    fig = plt.figure(figsize=panel_size("fig1d"), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.13])
+    ax = fig.add_subplot(grid[0])
+    legend_ax = fig.add_subplot(grid[1])
     legend_ax.axis("off")
-    seen = []
+    seen, ratios, phasers = [], {}, []
     for platform in st.PLATFORMS:
         for phaser in st.PHASERS:
             xs, ys = [], []
@@ -439,29 +445,40 @@ def fig7d(db, ctx, ref):
                         xs.append(max(x, 1e-3))
                         ys.append(max(y, 1e-3))
             if xs:
-                ax.scatter(xs, ys, s=12, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
-                           edgecolor="white", linewidth=0.4, alpha=0.9, zorder=3)
+                ax.scatter(xs, ys, s=8, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
+                           edgecolor="white", linewidth=0.3, alpha=0.9, zorder=3)
                 seen += xs + ys
+                ratios.setdefault(platform, []).extend(y / x for x, y in zip(xs, ys))
+                if phaser not in phasers:
+                    phasers.append(phaser)
     if not seen:
         plt.close(fig)
         raise NoData("no anchor-oriented accuracy for %s - run readacc_anchor.sh" % ref)
     lo, hi = min(seen) / 1.5, max(seen) * 1.5
-    ax.plot([lo, hi], [lo, hi], color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
+    # x reaches further right and y further down than the runs, so the corner
+    # under the diagonal is free for the platform legend
+    ax.plot([lo / 6, hi * 6], [lo / 6, hi * 6], color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlim(lo, hi)
-    ax.set_ylim(lo, hi)
-    log_ticks(ax.xaxis, lo, hi)
-    log_ticks(ax.yaxis, lo, hi)
+    ax.set_xlim(lo, hi * 6)
+    ax.set_ylim(lo / 6, hi)
+    log_ticks(ax.xaxis, lo, hi * 6)
+    log_ticks(ax.yaxis, lo / 6, hi)
     ax.set_xlabel("Reads on the wrong haplotype (%),\nblocks oriented by their SNPs")
     ax.set_ylabel("Reads on the wrong haplotype (%),\nblocks oriented by an anchor read")
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
-    first = legend_ax.legend(handles=platform_handles(line=False), title="Platform", loc="upper left",
-                             borderaxespad=0)
-    legend_ax.add_artist(first)
+    ax.set_axisbelow(True)
+    ax.legend(handles=[Line2D([], [], color="none", marker="o", markerfacecolor=st.PLATFORM_COLOR[p],
+                              markeredgecolor="white",
+                              label="%s  ×%.2f" % (st.PLATFORM_LABEL[p], float(np.median(ratios[p]))))
+                       for p in st.PLATFORMS if p in ratios],
+              title="Anchor / SNP (median)", loc="lower right", borderaxespad=0.2,
+              handletextpad=0.1, labelspacing=0.25)
     legend_ax.legend(handles=[Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
-                                     markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS],
-                     title="Phaser", loc="upper left", bbox_to_anchor=(0, 0.6), borderaxespad=0)
+                                     markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in phasers],
+                     loc="center", ncol=3, borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
+    paper_title(fig, "Comparison of haplotagging error rates using different phase-block "
+                     "orientation strategies")
     return save(fig, ctx, "fig7d_anchor_vs_variant_orientation_" + ref)
 
 
@@ -471,13 +488,10 @@ def fig7g(db, ctx, ref):
     oriented by their SNPs, y how many times more there are with blocks
     oriented by an anchor read. No difference is the dashed line at 1; over it
     the SNP orientation is better. y runs from 0.8 to 2, so the gap from 1
-    shows; runs outside are left out."""
-    # narrow, about a third of the page: short labels, the legend in rows of 2-3
-    fig = plt.figure(figsize=(64 * st.MM, 84 * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.34])
-    ax = fig.add_subplot(grid[0])
-    legend_ax = fig.add_subplot(grid[1])
-    legend_ax.axis("off")
+    shows; runs outside are left out. Fig. 1d, as large as fig6 by platform
+    beside it; no legend of its own: colour (platform) and shape (phaser) are
+    those of Fig. 1c, whose legend serves both."""
+    fig, ax = plt.subplots(figsize=panel_size("small"), constrained_layout=True)
     xs_all, ys_all = [], []
     for platform in st.PLATFORMS:
         for phaser in st.PHASERS:
@@ -510,18 +524,12 @@ def fig7g(db, ctx, ref):
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
     ax.yaxis.set_minor_locator(NullLocator())
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
-    ax.set_title("Comparison of haplotagging error\nrates using different phase-block\norientation strategies")
+    paper_title(fig, "Comparison of haplotagging error rates using different phase-block "
+                     "orientation strategies")
     ax.set_xlabel("Reads not on their haplotype (%),\nSNP orientation")
     ax.set_ylabel("Fold increase,\nanchor read / SNP orientation")
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
-    first = legend_ax.legend(handles=platform_handles(line=False), loc="upper center", ncol=2,
-                             borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
-    legend_ax.add_artist(first)
-    legend_ax.legend(handles=[Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
-                                     markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS],
-                     loc="lower center", ncol=3, borderaxespad=0, handletextpad=0.2,
-                     columnspacing=0.8)
     return save(fig, ctx, "fig7g_anchor_vs_variant_recall_ratio_" + ref)
 
 

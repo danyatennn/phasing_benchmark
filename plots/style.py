@@ -109,11 +109,37 @@ SEQUENTIAL = LinearSegmentedColormap.from_list(
     "slate", ["#F4F6F8", "#B9C4CF", "#6D7F92", "#2C3A4B"]
 )
 
-FONT_SIZE = 7
+# Every PDF of the paper is drawn at the size it is placed in the figure page
+# (figures.pptx: 170 mm wide), so text is FONT_SIZE everywhere and never
+# scaled; SMALL_FONT only for the numbers over bars, CELL_FONT in heatmap cells.
+FONT_SIZE = 6
+TITLE_FONT = 7  # the panel title over a figure
+SMALL_FONT = 5
+CELL_FONT = 4.5  # the numbers of the heatmap cells, 4 mm wide in Fig. 1b
 MM = 1 / 25.4
-FULL_WIDTH = 180  # mm, a two-column figure
+PAGE_WIDTH = 170  # mm, the width of a figure page
+FULL_WIDTH = PAGE_WIDTH  # mm, a figure across the page
 PANEL_HEIGHT = 50  # mm, one row of panels
-SMALL_WIDTH = 64  # mm, a narrow figure that sits beside others of its width (fig6 by platform, fig7g)
+SMALL_WIDTH = 56  # mm, a third of the page (Fig. 1d, 1e)
+
+# (width, height) in mm of each panel of the paper, title and legend included.
+# Fig. 1: a the schematic; b two heatmaps one under the other beside c; d, e
+# three in a row. Fig. 2: a beside b; c over d beside e over f; g across.
+# Fig. 3: a, b, c, d one under the other, across the page.
+PAPER_PANELS = {
+    "heatmap": (110, 64),          # Fig. 1b, figS2b, one per reference
+    "regions": (60, 128),          # Fig. 1c, figR2, as high as the two heatmaps
+    "small": (SMALL_WIDTH, 56),    # Fig. 1e fig6b/fig6d by platform
+    "fig1d": (SMALL_WIDTH, 62),    # Fig. 1d fig6e, the phaser legend under it
+    "fig3": (122, 80),             # Fig. 2a, both references
+    "fig4": (48, 80),              # Fig. 2b
+    "lines": (110, 44),            # Fig. 2c fig2a, no legend
+    "lines_legend": (110, 50),     # Fig. 2d fig2b, the legend under it
+    "ratio_by_technology": (60, 47),  # Fig. 2e, 2f
+    "fig5d": (PAGE_WIDTH, 88),     # Fig. 2g
+    "experiment": (PAGE_WIDTH, 62),         # Fig. 3a, 3c, no legend
+    "experiment_legend": (PAGE_WIDTH, 68),  # Fig. 3b, 3d
+}
 
 FONT_STACK = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
 
@@ -150,6 +176,8 @@ def apply_style(font_dir):
         "ytick.labelsize": FONT_SIZE,
         "legend.fontsize": FONT_SIZE,
         "legend.title_fontsize": FONT_SIZE,
+        "figure.titlesize": TITLE_FONT,
+        "figure.titleweight": "normal",
         "font.weight": "normal",
         "axes.titleweight": "normal",
         "axes.labelweight": "normal",

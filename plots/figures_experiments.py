@@ -59,7 +59,7 @@ from matplotlib.ticker import MaxNLocator
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import Metrics, _read_table, num, ratio, sample_root
-from figures import (NoData, finite, matpat_recall, n50_mb, panel_row, positive, read_precision_pct,
+from figures import (NoData, finite, matpat_recall, n50_mb, panel_row, paper_title, positive, read_precision_pct,
                      read_recall_pct, save, switch_pct, top_legend)
 
 DEPTH = 30
@@ -95,7 +95,7 @@ def reads_wrong_pct(db, key):
 METRICS = [
     ("switch", "Switch error rate (%)", switch_pct, True),
     ("hamming", "Hamming error rate (%)", hamming_pct, True),
-    ("ng50", "Block NG50 (Mb)", n50_mb, True),
+    ("ng50", "Phase-block NG50 (Mb)", n50_mb, True),
     ("reads_missed", "Truth-tagged reads not tagged\nto their haplotype (%)", reads_missed_pct, False),
 ]
 READS_WRONG = ("reads_wrong", "Tagged reads on the\nwrong haplotype (%)", reads_wrong_pct, False)
@@ -132,29 +132,45 @@ def legend_patches(items):
                   label=label) for label, alpha, hatch in items]
 
 
-def group_panels(platforms, height):
+def group_panels(platforms, width, height, legend=True):
     """A panel per platform, each as wide as its number of phaser groups, so
     a group is as wide on PacBio (five phasers) as on ONT (four); one shared
-    y axis, the legend strip under the panels."""
+    y axis, the legend strip under the panels (legend_ax None without)."""
     widths = [len(phasers_on(p)) for p in platforms]
-    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, height * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, len(platforms), width_ratios=widths, height_ratios=[1, 0.1])
+    fig = plt.figure(figsize=(width * st.MM, height * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2 if legend else 1, len(platforms), width_ratios=widths,
+                            height_ratios=[1, 0.1] if legend else None)
     axes = []
     for i in range(len(platforms)):
         ax = fig.add_subplot(grid[0, i], sharey=axes[0] if axes else None)
         if i:
             ax.tick_params(labelleft=False)
         axes.append(ax)
-    legend_ax = fig.add_subplot(grid[1, :])
-    legend_ax.axis("off")
+    legend_ax = None
+    if legend:
+        legend_ax = fig.add_subplot(grid[1, :])
+        legend_ax.axis("off")
     return fig, legend_ax, axes
 
 
-def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend):
+# the panels of the paper: (st.PAPER_PANELS key, legend?, title) by file
+# prefix; any other file is as wide as the page with its legend, no title
+PAPER = {
+    "figA1": ("experiment", False, "Impact of additional variant types on switch error rates"),
+    "figA3": ("experiment_legend", True, "Impact of additional variant types on phase-block NG50"),
+    "figB1": ("experiment", False, "Effect of DNA methylation integration on switch error rate"),
+    "figB3": ("experiment_legend", True, "Effect of DNA methylation integration on phase-block NG50"),
+}
+
+
+def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper=None):
     """A panel per platform, a group per phaser; bars_of(platform, phaser) ->
-    [(key, alpha, hatch)], the first the reference the others are compared with."""
+    [(key, alpha, hatch)], the first the reference the others are compared with.
+    paper: an entry of PAPER, the size, legend and title of a panel of the paper."""
     tag, ylabel, value, log = metric
-    fig, legend_ax, axes = group_panels(platforms, st.PANEL_HEIGHT + 14)
+    size, with_legend, title = paper or (None, True, None)
+    width, height = st.PAPER_PANELS[size] if size else (st.FULL_WIDTH, st.PANEL_HEIGHT + 14)
+    fig, legend_ax, axes = group_panels(platforms, width, height, with_legend)
     drawn = []
     for ax, platform in zip(axes, platforms):
         phasers = phasers_on(platform)
@@ -188,6 +204,7 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend):
         ticks = MaxNLocator(5).tick_values(bottom, min(top, 100))
         axes[0].set_yticks([t for t in ticks if bottom <= t <= 100])
     top_legend(legend_ax, legend_patches(legend))
+    paper_title(fig, title)
     return save(fig, ctx, name)
 
 
@@ -204,7 +221,7 @@ def figA_metric(db, ctx, sample, ref, number, metric, extra):
                              for k in keys(p, ph)]
     legend = [(INPUT_LABEL["truth"], PALE, None)] + [(INPUT_LABEL[c], 1.0, hatch[c]) for c in extra]
     return compare_groups(db, ctx, fig_name("figA%d_%s" % (number, metric[0]), sample, ref), ref,
-                          metric, platforms, bars_of, legend)
+                          metric, platforms, bars_of, legend, PAPER.get("figA%d" % number))
 
 
 def variants_table(root, sample):
@@ -230,7 +247,7 @@ def variant_bars(ctx, sample, ref, name, table, extra, value, ylabel, note=None,
     if not platforms:
         raise NoData("no variants_eval rows for %s %s" % (sample, ref))
     hatch = {"truthindel": None, "truthall": "////"}
-    fig, legend_ax, axes = group_panels(platforms, st.PANEL_HEIGHT + 14)
+    fig, legend_ax, axes = group_panels(platforms, st.FULL_WIDTH, st.PANEL_HEIGHT + 14)
     xs, w = offsets(len(extra))
     drawn = []
     for ax, platform in zip(axes, platforms):
@@ -296,10 +313,10 @@ def figB_metric(db, ctx, sample, ref, number, metric):
             out.append(((ref, "truth", platform, DEPTH, "lpmod"), 1.0, "////"))
         return out
 
-    legend = [("phaser alone", PALE, None), ("+ MethPhaser", 1.0, None),
+    legend = [("Phasing method alone", PALE, None), ("+ MethPhaser", 1.0, None),
               ("LongPhase + 5mC (modcall)", 1.0, "////")]
     return compare_groups(db, ctx, fig_name("figB%d_%s" % (number, metric[0]), sample, ref), ref,
-                          metric, platforms, bars_of, legend)
+                          metric, platforms, bars_of, legend, PAPER.get("figB%d" % number))
 
 
 # ---------------------------------------------------------- C: assemblies

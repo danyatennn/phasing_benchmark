@@ -29,6 +29,7 @@ import argparse
 import math
 import os
 import sys
+import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -39,10 +40,11 @@ from matplotlib.patches import Patch
 
 import style as st
 from data import Metrics, sample_root
-from figures import NoData, finite, save, series_handle, stratum_label, top_legend
+from figures import NoData, finite, paper_title, save, series_handle, stratum_label
 
-PLATFORM_SHORT = {"ont4k": "ONT\n4 kHz", "ont5k": "ONT\n5 kHz", "hifi": "PacBio\nSequel II",
-                  "revio": "PacBio\nRevio"}
+# one line a bar: two lines of FONT_SIZE are taller than a bar of Fig. 1c; the
+# legend under the panels names the platform in full
+PLATFORM_SHORT = {"ont4k": "ONT 4 kHz", "ont5k": "ONT 5 kHz", "hifi": "Sequel II", "revio": "Revio"}
 
 
 def region_order(db, present):
@@ -196,12 +198,13 @@ def fig_tagged(ctx, db, ref):
     # the bar is over the phasers run on every platform, so the platforms share it
     common = [p for p in phasers if all(st.applies(pl, p) for pl in platforms)]
 
-    # horizontal bars: a row per platform, the share tagged along x, the legend
-    # under the panels
-    ncols = min(4, len(regions))
+    # Fig. 1c: horizontal bars, a row per platform, the share tagged along x;
+    # two panels to a row, the legend under the panels
+    ncols = min(2, len(regions))
     nrows = math.ceil(len(regions) / ncols)
-    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, (16 + 38 * nrows) * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(nrows + 1, ncols, height_ratios=[1] * nrows + [0.16])
+    w, h = st.PAPER_PANELS["regions"]
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(nrows + 1, ncols, height_ratios=[1] * nrows + [0.95])
     legend_ax = fig.add_subplot(grid[nrows, :])
     legend_ax.axis("off")
 
@@ -223,11 +226,13 @@ def fig_tagged(ctx, db, ref):
                     ax.plot(v, i + off, marker=st.PHASER_MARKER[phaser], color=color,
                             markeredgecolor="white", linestyle="none", zorder=3)
         title = "Confident regions (chr1-22)" if region == "genome" else stratum_label(region)
-        ax.set_title(title.replace("\n", " "))
+        # a panel is narrow: a long name goes on two lines
+        ax.set_title(textwrap.fill(title.replace("\n", " "), 22))
         ax.set_yticks(y)
         ax.set_yticklabels([PLATFORM_SHORT[p] for p in platforms])
         ax.set_ylim(len(platforms) - 0.4, -0.6)
         ax.set_xlim(0, 100)
+        ax.set_xticks([0, 25, 50, 75, 100])
         ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
         ax.set_axisbelow(True)
         ax.tick_params(axis="y", length=0)
@@ -235,11 +240,19 @@ def fig_tagged(ctx, db, ref):
             ax.tick_params(labelleft=False)
         # the x label once per row of panels would repeat; it goes on the last row
         if n // ncols == nrows - 1 or n + ncols >= len(regions):
-            ax.set_xlabel("%s tagged (%%)" % ("Reads" if ctx.unit == "reads" else "Read bases"))
+            ax.set_xlabel("Haplotagged %s (%%)" % ("reads" if ctx.unit == "reads" else "read bases"))
 
-    handles = [Patch(color=st.PLATFORM_COLOR[p], alpha=0.3, label=st.PLATFORM_LABEL[p]) for p in platforms]
-    handles += [series_handle(st.INK, st.PHASER_MARKER[p], st.PHASER_LABEL[p], line=False) for p in phasers]
-    top_legend(legend_ax, handles, ncol=min(len(handles), 5))
+    # platforms two to a row over the phasers three to a row
+    first = legend_ax.legend(handles=[Patch(color=st.PLATFORM_COLOR[p], alpha=0.3, label=st.PLATFORM_LABEL[p])
+                                      for p in platforms],
+                             loc="upper center", ncol=2, borderaxespad=0, columnspacing=1.0)
+    legend_ax.add_artist(first)
+    legend_ax.legend(handles=[series_handle(st.INK, st.PHASER_MARKER[p], st.PHASER_LABEL[p], line=False)
+                              for p in phasers],
+                     loc="lower center", ncol=3, borderaxespad=0,
+                     handletextpad=0.2, columnspacing=0.8)
+    paper_title(fig, "Comparison of haplotagged %s across different genomic regions on %s"
+                % ("reads" if ctx.unit == "reads" else "read bases", st.REFERENCE_LABEL[ref]))
     suffix = "" if ctx.unit == "reads" else "_bases"
     return save(fig, ctx, "figR2_tagged_strata%s_%s" % (suffix, ref))
 

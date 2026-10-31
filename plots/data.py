@@ -18,6 +18,8 @@ replaced where the autosome table has the same column):
   <run>.<readacc rules>.tsv         read_precision, read_recall (blocks oriented
                                     by their SNPs)
   <run>.anchor_<truth>_<rules>.tsv  read_precision_anchor_<truth>, ...
+  <run>.readacc_<truth>_<rules>.tsv read_precision_var_<truth>, ... (blocks
+                                    oriented by their SNPs, bin/readacc_truths.sh)
 
 HG002 lives at the project root; any other sample under samples/<sample>/.
 """
@@ -63,6 +65,16 @@ ANCHOR_COLUMNS = [
     "anchors", "blocks_flipped", "read_precision", "read_recall",
 ]
 ANCHOR_TRUTHS = ["truthtags", "matpat", "yak"]
+
+# bin/readacc_truths.sh: read accuracy against each read truth, every block
+# oriented by its SNPs as in readacc_run.sh; *_common over the reads that carry
+# a label of this truth and of the truth VCF, the numbers to compare truths by
+VARTRUTH_COLUMNS = [
+    "reference", "region", "caller", "platform", "depth", "phaser", "truth_source",
+    "reads_truth_tagged", "reads_tagged", "reads_compared", "reads_correct", "reads_unoriented",
+    "read_precision", "read_recall", "reads_truth_common", "reads_compared_common",
+    "reads_correct_common", "read_precision_common", "read_recall_common",
+]
 
 # plots/ng50_autosomes.py
 NG50_COLUMNS = ["reference", "caller", "platform", "depth", "phaser",
@@ -206,6 +218,8 @@ class Metrics:
         for truth in ANCHOR_TRUTHS:
             self._merge(row, key, ".anchor_%s_%s.tsv" % (truth, self.rules), ANCHOR_COLUMNS,
                         rename={c: "%s_anchor_%s" % (c, truth) for c in ANCHOR_COLUMNS})
+            self._merge(row, key, ".readacc_%s_%s.tsv" % (truth, self.rules), VARTRUTH_COLUMNS,
+                        rename={c: "%s_var_%s" % (c, truth) for c in VARTRUTH_COLUMNS})
         self.rows[key] = row
         return "done"
 

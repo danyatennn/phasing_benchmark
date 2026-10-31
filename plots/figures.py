@@ -59,16 +59,35 @@ def save(fig, ctx, name):
     return name + ".pdf"
 
 
-def panel_row(n, height=st.PANEL_HEIGHT, width=st.FULL_WIDTH, sharex=False):
-    """A strip for the legend on top, n panels with one shared y axis below."""
+def panel_size(key):
+    """figsize of a panel of the paper, st.PAPER_PANELS"""
+    w, h = st.PAPER_PANELS[key]
+    return w * st.MM, h * st.MM
+
+
+def paper_title(fig, text):
+    """The panel title over the whole figure, wrapped to its width: about
+    1.45 mm a letter at TITLE_FONT in Arial."""
+    if text:
+        fig.suptitle(textwrap.fill(text, int(fig.get_figwidth() / st.MM / 1.45)))
+
+
+def panel_row(n, height=st.PANEL_HEIGHT, width=st.FULL_WIDTH, sharex=False, legend="top"):
+    """n panels with one shared y axis and a strip for the legend: legend
+    "top", "bottom" or None (no strip, legend_ax is None)."""
     fig = plt.figure(figsize=(width * st.MM, height * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, n, height_ratios=[0.08, 1])
-    legend_ax = fig.add_subplot(grid[0, :])
-    legend_ax.axis("off")
+    if legend is None:
+        grid, row, legend_ax = fig.add_gridspec(1, n), 0, None
+    else:
+        top = legend == "top"
+        grid = fig.add_gridspec(2, n, height_ratios=[0.08, 1] if top else [1, 0.08])
+        row = 1 if top else 0
+        legend_ax = fig.add_subplot(grid[0 if top else 1, :])
+        legend_ax.axis("off")
     axes = []
     for i in range(n):
         ax = fig.add_subplot(
-            grid[1, i],
+            grid[row, i],
             sharey=axes[0] if axes else None,
             sharex=axes[0] if (axes and sharex) else None)
         if i:
@@ -127,17 +146,23 @@ def caller_handles(callers, line=True):
 
 
 def top_legend(legend_ax, handles, **kwargs):
+    """The legend in its strip, one row; nothing when there is no strip."""
+    if legend_ax is None:
+        return
     kwargs.setdefault("ncol", len(handles))
     legend_ax.legend(handles=handles, loc="center", borderaxespad=0, **kwargs)
 
 
 # ------------------------------------------------- lines over coverage: 1, 2, 7
 
-def coverage_lines(db, ctx, name, ref, value, ylabel, by, log=False, caller="truth"):
+def coverage_lines(db, ctx, name, ref, value, ylabel, by, log=False, caller="truth",
+                   size=None, title=None, legend="top"):
     """by='platform': a panel per platform, a line per phaser.
        by='phaser':   a panel per phaser, a line per platform.
        by='caller':   a panel per platform, a line per caller - for what the
-                      caller alone decides, so the phaser is not a dimension."""
+                      caller alone decides, so the phaser is not a dimension.
+       size: a key of st.PAPER_PANELS; title over the figure; legend "top",
+       "bottom" or None."""
     if by == "caller":
         panels, series = st.PLATFORMS, [c for c in st.CALLERS if c != "truth"]
         panel_label, color, marker = st.PLATFORM_LABEL, st.CALLER_COLOR, st.CALLER_MARKER
@@ -156,7 +181,8 @@ def coverage_lines(db, ctx, name, ref, value, ylabel, by, log=False, caller="tru
         handles = platform_handles()
         key = lambda panel, s, depth: (ref, caller, s, depth, panel)
 
-    fig, legend_ax, axes = panel_row(len(panels))
+    w, h = st.PAPER_PANELS[size] if size else (st.FULL_WIDTH, st.PANEL_HEIGHT)
+    fig, legend_ax, axes = panel_row(len(panels), height=h, width=w, legend=legend)
     drawn = []
     for ax, panel in zip(axes, panels):
         lines = 0
@@ -187,6 +213,7 @@ def coverage_lines(db, ctx, name, ref, value, ylabel, by, log=False, caller="tru
         log_ticks(axes[0].yaxis, min(drawn), max(drawn))
     axes[0].set_ylabel(ylabel)
     top_legend(legend_ax, handles)
+    paper_title(fig, title)
     return save(fig, ctx, name)
 
 
@@ -243,7 +270,7 @@ def fig1a(db, ctx, ref):
 
 def fig1b(db, ctx, ref):
     return coverage_lines(db, ctx, "fig1b_block_n50_by_platform_" + ref, ref,
-                          n50_mb, "Phase block NG50 (Mb)", "platform", log=True)
+                          n50_mb, "Phase-block NG50 (Mb)", "platform", log=True)
 
 
 def fig1c(db, ctx, ref):
@@ -252,13 +279,19 @@ def fig1c(db, ctx, ref):
 
 
 def fig2a(db, ctx, ref):
+    """Fig. 2c: under it Fig. 2d carries the legend of both"""
     return coverage_lines(db, ctx, "fig2a_switch_rate_by_phaser_" + ref, ref,
-                          switch_pct, "Switch error rate (%)", "phaser", log=True)
+                          switch_pct, "Switch error rate (%)", "phaser", log=True,
+                          size="lines", legend=None,
+                          title="Comparison of switch error rates across phasing methods")
 
 
 def fig2b(db, ctx, ref):
+    """Fig. 2d"""
     return coverage_lines(db, ctx, "fig2b_block_n50_by_phaser_" + ref, ref,
-                          n50_mb, "Phase block NG50 (Mb)", "phaser", log=True)
+                          n50_mb, "Phase-block NG50 (Mb)", "phaser", log=True,
+                          size="lines_legend", legend="bottom",
+                          title="Comparison of phase-block NG50 across phasing methods")
 
 
 def fig7a(db, ctx, ref):
@@ -299,52 +332,71 @@ def better_top_right(axes):
 FIG3_PACBIO_MAX = 0.5
 
 
-def fig3(db, ctx, ref, caller="truth"):
-    # one shape: the colour is the phaser, the size of the ball the coverage,
-    # small at 10x to big at 50x
+def fig3(db, ctx, caller="truth"):
+    """Fig. 2a: a row per reference (T2T-CHM13 over GRCh38), a panel per
+    platform. One shape: the colour is the phaser, the size of the ball the
+    coverage, small at 10x to big at 50x. x and y are shared within a
+    technology, across both rows, so the references compare by eye."""
     sizes = [5 + 7 * i for i in range(len(st.DEPTHS))]
-    # as panel_row, but x and y are shared within a technology only
-    fig = plt.figure(figsize=(st.FULL_WIDTH * st.MM, st.PANEL_HEIGHT * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, len(st.PLATFORMS), height_ratios=[0.08, 1])
-    legend_ax = fig.add_subplot(grid[0, :])
+    refs = list(reversed(st.REFERENCES))
+    fig = plt.figure(figsize=panel_size("fig3"), constrained_layout=True)
+    # a narrow first column for the reference of each row; under the panels
+    # one x label for all, then the legend
+    grid = fig.add_gridspec(len(refs) + 2, len(st.PLATFORMS) + 1,
+                            width_ratios=[0.07] + [1] * len(st.PLATFORMS),
+                            height_ratios=[1] * len(refs) + [0.05, 0.16])
+    xlabel_ax = fig.add_subplot(grid[len(refs), 1:])
+    xlabel_ax.axis("off")
+    xlabel_ax.text(0.5, 0.5, "Phase-block NG50 (Mb)", ha="center", va="center",
+                   transform=xlabel_ax.transAxes)
+    legend_ax = fig.add_subplot(grid[len(refs) + 1, :])
     legend_ax.axis("off")
     tech = {pl: t for t, pls in TECHNOLOGIES for pl in pls}
-    axes, first_of = [], {}
-    for i, platform in enumerate(st.PLATFORMS):
-        t = tech.get(platform, platform)
-        ax = fig.add_subplot(grid[1, i], sharex=first_of.get(t), sharey=first_of.get(t))
-        if t in first_of:
-            ax.tick_params(labelleft=False)
-        first_of.setdefault(t, ax)
-        axes.append(ax)
-    xs_all, xs_by, ys_by = [], {}, {}
-    for ax, platform in zip(axes, st.PLATFORMS):
-        lines = 0
-        for phaser in st.PHASERS:
-            pts = []
-            for depth, size in zip(st.DEPTHS, sizes):
-                key = (ref, caller, platform, depth, phaser)
-                x, y = positive(n50_mb(db, key)), positive(switch_pct(db, key))
-                if finite(x) and finite(y):
-                    pts.append((x, y, size))
-            if not pts:
-                continue
-            xs, ys, ss = zip(*pts)
-            ax.plot(xs, ys, color=st.PHASER_COLOR[phaser], linewidth=0.8, zorder=2)
-            ax.scatter(xs, ys, s=ss, color=st.PHASER_COLOR[phaser],
-                       marker="o", edgecolor="white", linewidth=0.5, zorder=3)
-            xs_all.extend(xs)
-            xs_by.setdefault(tech.get(platform, platform), []).extend(xs)
-            ys_by.setdefault(tech.get(platform, platform), []).extend(ys)
-            lines += 1
-        ax.set_title(st.PLATFORM_LABEL[platform])
-        ax.set_xlabel("Phase block NG50 (Mb)")
-        y_grid(ax)
-        if not lines:
-            empty_panel(ax)
-    if not xs_all:
+    first_of, xs_by, ys_by, panels = {}, {}, {}, []
+    for r, ref in enumerate(refs):
+        label_ax = fig.add_subplot(grid[r, 0])
+        label_ax.axis("off")
+        label_ax.text(0.5, 0.5, st.REFERENCE_LABEL[ref], rotation=90, ha="center", va="center",
+                      transform=label_ax.transAxes)
+        row_first = set()
+        for i, platform in enumerate(st.PLATFORMS):
+            t = tech.get(platform, platform)
+            ax = fig.add_subplot(grid[r, i + 1], sharex=first_of.get(t), sharey=first_of.get(t))
+            first_of.setdefault(t, ax)
+            # the y ticks once per technology in a row, the y label once per row
+            if t in row_first:
+                ax.tick_params(labelleft=False)
+            if i == 0:
+                ax.set_ylabel("Switch error rate (%)")
+            row_first.add(t)
+            if r == 0:
+                ax.set_title(st.PLATFORM_LABEL[platform])
+            if r < len(refs) - 1:
+                ax.tick_params(labelbottom=False)
+            y_grid(ax)
+            lines = 0
+            for phaser in st.PHASERS:
+                pts = []
+                for depth, size in zip(st.DEPTHS, sizes):
+                    key = (ref, caller, platform, depth, phaser)
+                    x, y = positive(n50_mb(db, key)), positive(switch_pct(db, key))
+                    if finite(x) and finite(y):
+                        pts.append((x, y, size))
+                if not pts:
+                    continue
+                xs, ys, ss = zip(*pts)
+                ax.plot(xs, ys, color=st.PHASER_COLOR[phaser], linewidth=0.8, zorder=2)
+                ax.scatter(xs, ys, s=ss, color=st.PHASER_COLOR[phaser],
+                           marker="o", edgecolor="white", linewidth=0.5, zorder=3)
+                xs_by.setdefault(t, []).extend(xs)
+                ys_by.setdefault(t, []).extend(ys)
+                lines += 1
+            if not lines:
+                empty_panel(ax)
+            panels.append(ax)
+    if not xs_by:
         plt.close(fig)
-        raise NoData("no %s rows for %s" % (caller, ref))
+        raise NoData("no %s rows" % caller)
 
     for t, ax in first_of.items():
         xs, ys = xs_by.get(t), ys_by.get(t)
@@ -361,15 +413,18 @@ def fig3(db, ctx, ref, caller="truth"):
         # fewer errors go up, so the best run sits in the top right corner
         ax.set_ylim(hi, lo)
         log_ticks(ax.yaxis, lo, hi)
-        ax.set_ylabel("Switch error rate (%)")
 
     phasers = [series_handle(st.PHASER_COLOR[p], "o", st.PHASER_LABEL[p]) for p in st.PHASERS]
     coverage = [Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
                        markeredgecolor="white", markersize=math.sqrt(s),
                        label="%d×" % d)
                 for d, s in zip(st.DEPTHS, sizes)]
-    top_legend(legend_ax, phasers + coverage, handletextpad=0.3, columnspacing=1.0)
-    return save(fig, ctx, "fig3_accuracy_vs_contiguity_" + ref)
+    # two rows, the phasers over the coverages: a legend filled column by
+    # column, so the two lists go in turn
+    handles = [h for pair in zip(phasers, coverage) for h in pair]
+    top_legend(legend_ax, handles, ncol=len(phasers), handletextpad=0.3, columnspacing=1.0)
+    paper_title(fig, "Switch error rate vs phase-block NG50 across phasing methods")
+    return save(fig, ctx, "fig3_accuracy_vs_contiguity")
 
 
 # ------------------------------------------------------- kinds of error: 4, S1
@@ -385,24 +440,28 @@ def phaser_axis(ax):
 def fig4(db, ctx, ref, caller="truth"):
     """Switch errors (a stretch phased the wrong way) per 100 assessed pairs:
     a panel per platform, one under the other, sharing x, a horizontal bar per
-    phaser. The phaser is named on the axis, so no legend."""
+    phaser. The phaser is named on the axis, so no legend. A platform lists
+    only the phasers that run on it (no HiPhase on ONT), and its panel is as
+    high as its number of bars."""
     depth = ctx.depth
     n = len(st.PLATFORMS)
-    fig, axes = plt.subplots(n, 1, sharex=True, figsize=(56 * st.MM, (12 + 19 * n) * st.MM),
-                             constrained_layout=True)
+    phasers_of = {pl: [p for p in st.PHASERS if st.applies(pl, p)] for pl in st.PLATFORMS}
+    fig, axes = plt.subplots(n, 1, sharex=True, figsize=panel_size("fig4"), constrained_layout=True,
+                             gridspec_kw={"height_ratios": [len(phasers_of[pl]) for pl in st.PLATFORMS]})
     bars = 0
     for ax, platform in zip(axes, st.PLATFORMS):
+        phasers = phasers_of[platform]
         here = 0
-        for i, phaser in enumerate(st.PHASERS):
+        for i, phaser in enumerate(phasers):
             rates = db.switch_flip((ref, caller, platform, depth, phaser))
             if rates is None:
                 continue
             ax.barh(i, 100 * rates[0], height=0.7, color=st.PHASER_COLOR[phaser], linewidth=0, zorder=3)
             here += 1
         ax.set_title(st.PLATFORM_LABEL[platform], loc="left")
-        ax.set_yticks(range(len(st.PHASERS)))
-        ax.set_yticklabels([st.PHASER_LABEL[p] for p in st.PHASERS])
-        ax.set_ylim(len(st.PHASERS) - 0.5, -0.5)
+        ax.set_yticks(range(len(phasers)))
+        ax.set_yticklabels([st.PHASER_LABEL[p] for p in phasers])
+        ax.set_ylim(len(phasers) - 0.5, -0.5)
         ax.tick_params(axis="y", length=0)
         ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
         ax.set_axisbelow(True)
@@ -417,6 +476,7 @@ def fig4(db, ctx, ref, caller="truth"):
     # a narrow axis: four ticks at most, so the labels do not touch
     axes[0].xaxis.set_major_locator(MaxNLocator(4))
     axes[-1].set_xlabel("Switch errors per 100 pairs\nof het SNPs, %d×" % depth)
+    paper_title(fig, "Switch errors across phasing methods")
     return save(fig, ctx, "fig4_switch_errors_%dx_%s" % (depth, ref))
 
 
@@ -495,7 +555,7 @@ def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, label=No
                 red, green, blue, _ = im.cmap(im.norm(arr[r, c]))
                 dark = 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5
                 ax.text(c, r, label(arr[r, c]), ha="center", va="center", zorder=3,
-                        color="white" if dark else st.INK)
+                        fontsize=st.CELL_FONT, color="white" if dark else st.INK)
 
     row_edges = set(np.cumsum([n for _, n in row_groups])[:-1])
     col_edges = set(np.cumsum([n for _, n in col_groups])[:-1])
@@ -551,9 +611,14 @@ def log_norm(values):
     return LogNorm(vmin=lo, vmax=hi)
 
 
-def colorbar(fig, im, ax, label):
-    bar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.015, aspect=22)
-    bar.set_label(label)
+def colorbar(fig, im, ax, label, unit=None):
+    """unit: written over the bar instead of label along it, which takes the
+    width of a line of text from the plot"""
+    bar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.01, aspect=30)
+    if unit:
+        bar.ax.set_title(unit, fontsize=st.FONT_SIZE, pad=3)
+    else:
+        bar.set_label(label)
     bar.outline.set_visible(False)
     if isinstance(im.norm, LogNorm):
         bar.ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
@@ -592,7 +657,7 @@ def short_number(v):
     return "%.0f" % v if v >= 10 else "%.2g" % v
 
 
-def grid_heatmap(db, ctx, ref, name, value, bar_label):
+def grid_heatmap(db, ctx, ref, name, value, bar_label, title=None, unit=None):
     """The whole grid of one reference - caller x phaser down, platform x depth
     across - on one log colour scale, every cell labelled with its value.
     Only for metrics whose denominator does not depend on the caller."""
@@ -602,11 +667,12 @@ def grid_heatmap(db, ctx, ref, name, value, bar_label):
     if not values:
         raise NoData("no rows for %s" % ref)
 
-    fig, ax = plt.subplots(figsize=(st.FULL_WIDTH * st.MM, 92 * st.MM), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=panel_size("heatmap"), constrained_layout=True)
     im = heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups,
                  label=lambda v: f"{v:.2f}", cmap=st.SEQUENTIAL, norm=log_norm(values))
     ax.set_xlabel("Coverage (×)")
-    colorbar(fig, im, ax, bar_label)
+    colorbar(fig, im, ax, bar_label, unit)
+    paper_title(fig, title)
     return save(fig, ctx, name + "_" + ref)
 
 
@@ -640,8 +706,10 @@ def figS2a(db, ctx, ref):
 
 
 def figS2b(db, ctx, ref):
+    """Fig. 1b, one per reference"""
     return grid_heatmap(db, ctx, ref, "figS2b_block_ng50_all_callers", n50_mb,
-                        "Phase block NG50 (Mb)")
+                        "Phase-block NG50 (Mb)",
+                        "Phase-block NG50 comparison using %s" % st.REFERENCE_LABEL[ref], unit="Mb")
 
 
 def figS2c(db, ctx, ref):
@@ -994,7 +1062,8 @@ def fig5d(db, ctx, ref):
     gap = 0.9
     ypos = [i + gap * st.CALLERS.index(c) for i, (c, _) in enumerate(rows)]
 
-    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=88, sharex=True)
+    w, h = st.PAPER_PANELS["fig5d"]
+    fig, legend_ax, axes = panel_row(len(st.PLATFORMS), height=h, width=w, sharex=True, legend="bottom")
     drawn = 0
     for ax, platform in zip(axes, st.PLATFORMS):
         here = 0
@@ -1033,6 +1102,8 @@ def fig5d(db, ctx, ref):
         Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
                markeredgecolor="white", label="Called and phased correctly, %d×" % depth),
     ])
+    paper_title(fig, "Heterozygous SNP calling and phasing accuracy across long-read sequencing "
+                     "platforms at %d× coverage" % depth)
     return save(fig, ctx, "fig5d_truth_recovered_%dx" % depth + "_" + ref)
 
 
@@ -1249,9 +1320,22 @@ def ratio_axis(ax, ratios, label, limits=None):
     axis of about +-3%, not the +-25% it used to get, so the boxes stay readable.
     The band of +-10% is shaded only when it fits inside the axis; on a zoomed
     axis every point is within 10% anyway. With limits the axis is linear
-    instead: (lo, hi) as given, or "symmetric" - 1 +- the smallest round step
-    that holds every ratio, the same distance below 1 as above."""
+    instead: (lo, hi) as given, "symmetric" - 1 +- the smallest round step
+    that holds every ratio, the same distance below 1 as above - or "from_0.99":
+    from 0.99 (lower if a ratio is) to the smallest round step over the highest."""
     a, b = st.REFERENCES[0], st.REFERENCES[1]
+    if limits == "from_0.99":
+        lo = min(0.99, math.floor(min(ratios) * 100) / 100)
+        far = max(max(ratios) - 1, 0) * 1.15
+        hi = 1 + next((h for h in NICE_HALF_SPANS if h >= far), NICE_HALF_SPANS[-1])
+        ax.set_ylim(lo, hi)
+        ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
+        ax.yaxis.set_major_locator(MaxNLocator(6, steps=[1, 2, 2.5, 5, 10]))
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % round(v, 4)))
+        ax.yaxis.set_minor_locator(NullLocator())
+        ax.set_ylabel("%s,\n%s / %s" % (label.replace(" (%)", "").replace(" (Mb)", ""),
+                                        st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
+        return
     if limits:
         if limits == "symmetric":
             far = max(abs(r - 1) for r in ratios) * 1.05
@@ -1288,13 +1372,13 @@ def ratio_axis(ax, ratios, label, limits=None):
     ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
 
 
-def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=None):
+def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=None, size=None):
     """groups: [(group label, [(box label, colour, [(platform, phaser), ...])])].
     Every point is one run on both references (same platform, coverage and
     phaser); a box pools the coverages. The box is the middle half of the
     ratios, its whiskers reach the furthest ratio within 1.5 box lengths, the
     black bar is the median, written as the change on T2T in percent just
-    over the highest point of the box."""
+    over the highest point of the box. size: a key of st.PAPER_PANELS."""
     pairs = reference_pairs(db, value)
     all_ratios = [y / x for pts in pairs.values() for x, y in pts]
     def change(m):
@@ -1307,10 +1391,10 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
     groups = [(g, [m for m in members if any(pairs.get(c) for c in m[2])]) for g, members in groups]
     groups = [(g, members) for g, members in groups if members]
     boxes = sum(len(boxes) for _, boxes in groups)
-    # four boxes fit SMALL_WIDTH, so fig6 by platform is as narrow as fig7g
-    width = max(st.SMALL_WIDTH, 20 + 8 * boxes)
-    fig, ax = plt.subplots(figsize=(width * st.MM, 70 * st.MM),
-                           constrained_layout=True)
+    width, height = st.PAPER_PANELS[size] if size else (max(st.SMALL_WIDTH, 20 + 8 * boxes), 70)
+    # under 7 mm a box, "+0.7%" is wider than the box: the median goes upright
+    turned = width / boxes < 7
+    fig, ax = plt.subplots(figsize=(width * st.MM, height * st.MM), constrained_layout=True)
     rng = np.random.RandomState(0)
     pos, ticks, tick_labels = 0, [], []
     for g, (group_label, members) in enumerate(groups):
@@ -1331,20 +1415,20 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
                 if isinstance(limits, tuple):
                     top = min(top, limits[1])
                 ax.annotate(change(float(np.median(r))), xy=(pos, top), xytext=(0, 2),
-                            textcoords="offset points", ha="center", va="bottom", annotation_clip=False)
+                            textcoords="offset points", ha="center", va="bottom", annotation_clip=False,
+                            rotation=90 if turned else 0, fontsize=st.SMALL_FONT if turned else None)
             ticks.append(pos)
             tick_labels.append(box_label)
             pos += 1
         if group_label:
             ax.annotate(group_label, xy=((first + pos - 1) / 2, 1),
-                        xycoords=ax.get_xaxis_transform(), xytext=(0, 13),
+                        xycoords=ax.get_xaxis_transform(), xytext=(0, 22 if turned else 13),
                         textcoords="offset points", ha="center", va="bottom")
             if g < len(groups) - 1:
                 ax.axvline(pos - 0.5 + 0.35, color=st.GRID, linewidth=0.8, zorder=0)
         pos += 0.7 if g < len(groups) - 1 else 0
     ratio_axis(ax, all_ratios, label, limits)
-    if title:
-        fig.suptitle(textwrap.fill(title, max(30, int(width / 1.9))))
+    paper_title(fig, title)
     ax.set_xticks(ticks)
     ax.set_xticklabels(tick_labels, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_xlim(-0.6, pos - 0.4)
@@ -1361,9 +1445,15 @@ def phaser_shapes():
                    markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in st.PHASERS]
 
 
-def reference_files(db, ctx, prefix, value, label, title=None, limits=REFERENCE_RATIO_LIMITS):
+def reference_files(db, ctx, prefix, value, label, subject=None, limits=REFERENCE_RATIO_LIMITS):
     """Every file of one metric; a file with nothing to show is skipped and
-    the others are still drawn. title and limits go to the ratio files."""
+    the others are still drawn. limits go to the ratio files, and a title
+    "Comparison of <subject> between T2T-CHM13 and GRCh38 across ..." -
+    sequencing platforms (by platform, Fig. 1e) or phasing methods (by
+    technology, Fig. 2e, 2f; by phaser)."""
+    def title(across):
+        return subject and "Comparison of %s between %s and %s across %s" % (
+            subject, st.REFERENCE_LABEL[st.REFERENCES[1]], st.REFERENCE_LABEL[st.REFERENCES[0]], across)
     every = [(pl, ph) for pl in st.PLATFORMS for ph in st.PHASERS]
     jobs = [
         ("scatter_all", lambda: reference_scatter_file(
@@ -1385,17 +1475,20 @@ def reference_files(db, ctx, prefix, value, label, title=None, limits=REFERENCE_
                  for p in st.PHASERS]
     jobs += [
         ("ratio_by_phaser", lambda: reference_box_file(
-            db, ctx, prefix + "_ratio_by_phaser", value, label, [("", by_phaser)], title, limits)),
+            db, ctx, prefix + "_ratio_by_phaser", value, label, [("", by_phaser)],
+            title("phasing methods"), limits)),
         ("ratio_by_technology", lambda: reference_box_file(
             db, ctx, prefix + "_ratio_by_technology", value, label,
             [(tech, [(st.PHASER_LABEL[p], st.PHASER_COLOR[p], [(pl, p) for pl in platforms])
                      for p in st.PHASERS])
-             for tech, platforms in TECHNOLOGIES], title, limits)),
+             for tech, platforms in TECHNOLOGIES], title("phasing methods"), limits,
+            size="ratio_by_technology")),
         ("ratio_by_platform", lambda: reference_box_file(
             db, ctx, prefix + "_ratio_by_platform", value, label,
             [(tech, [(st.PLATFORM_LABEL[pl], st.PLATFORM_COLOR[pl], [(pl, p) for p in st.PHASERS])
                      for pl in platforms])
-             for tech, platforms in TECHNOLOGIES], title, limits)),
+             for tech, platforms in TECHNOLOGIES], title("sequencing platforms"), limits,
+            size="small")),
     ]
     written = []
     for _, job in jobs:
@@ -1412,16 +1505,13 @@ def reference_files(db, ctx, prefix, value, label, title=None, limits=REFERENCE_
 
 def fig6a(db, ctx):
     return reference_files(db, ctx, "fig6a_reference_switch_rate", switch_pct,
-                           "Switch error rate (%)",
-                           "Comparison of switch error rates between T2T-CHM13 and GRCh38 "
-                           "across sequencing platforms")
+                           "Switch error rate (%)", "switch error rates")
 
 
 def fig6b(db, ctx):
+    """Fig. 1e left (by platform), Fig. 2e (by technology)"""
     return reference_files(db, ctx, "fig6b_reference_block_ng50", n50_mb,
-                           "Phase block NG50 (Mb)",
-                           "Comparison of phase block NG50 between T2T-CHM13 and GRCh38 "
-                           "across sequencing platforms")
+                           "Phase-block NG50 (Mb)", "phase-block NG50", limits="from_0.99")
 
 
 def fig6c(db, ctx):
@@ -1458,15 +1548,78 @@ def matpat_recall(db, sfx="_matpat"):
 
 
 def fig6d(db, ctx):
+    """Fig. 1e right (by platform), Fig. 2f (by technology)"""
     recall = matpat_recall(db)
     if not recall:
         raise NoData("no metrics_reads/summary_recall_strata_matpat.tsv - run "
                      "READ_TRUTH=matpat bash bin/read_recall_strata.sh on both references")
     return reference_files(db, ctx, "fig6d_reference_read_recall_matpat",
                            lambda db, key: recall.get(key, NAN),
-                           "Haplotagging read recall (%)",
-                           "Comparison of haplotagging recall between T2T-CHM13 and GRCh38 "
-                           "across sequencing platforms")
+                           "Read haplotagging recall (%)", "read haplotagging recall",
+                           limits="from_0.99")
+
+
+def fig6e(db, ctx):
+    """Fig. 1d: every run (truth input, every phaser and coverage) as a point,
+    read haplotagging recall on GRCh38 along x and on T2T-CHM13 along y, the
+    Q100 parental labels on the same reads for both (as fig6d). Colour is the
+    platform, shape the phaser; over the diagonal T2T-CHM13 is better. Each
+    platform's legend entry carries the mean over its runs of T2T-CHM13 minus
+    GRCh38, in percentage points."""
+    recall = matpat_recall(db)
+    if not recall:
+        raise NoData("no metrics_reads/summary_recall_strata_matpat.tsv - run "
+                     "READ_TRUTH=matpat bash bin/read_recall_strata.sh on both references")
+    pairs = reference_pairs(db, lambda db, key: recall.get(key, NAN))
+    a, b = st.REFERENCES[0], st.REFERENCES[1]
+    fig = plt.figure(figsize=panel_size("fig1d"), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.13])
+    ax = fig.add_subplot(grid[0])
+    legend_ax = fig.add_subplot(grid[1])
+    legend_ax.axis("off")
+    seen, gain, phasers = [], {}, []
+    for platform in st.PLATFORMS:
+        for phaser in st.PHASERS:
+            pts = pairs.get((platform, phaser))
+            if not pts:
+                continue
+            xs, ys = zip(*pts)
+            ax.scatter(xs, ys, s=8, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
+                       edgecolor="white", linewidth=0.3, alpha=0.9, zorder=3)
+            seen += list(xs) + list(ys)
+            gain.setdefault(platform, []).extend(y - x for x, y in pts)
+            if phaser not in phasers:
+                phasers.append(phaser)
+    span = max(seen) - min(seen)
+    lo, hi = min(seen) - 0.08 * span, max(seen) + 0.08 * span
+    # x reaches further right and y further down than the runs, by as much on
+    # both (the aspect stays equal), so the corner under the diagonal is free
+    # for the platform legend
+    extra = 0.7 * (hi - lo)
+    ax.plot([lo - extra, hi + extra], [lo - extra, hi + extra], color=st.MUTED, linewidth=0.6,
+            linestyle=(0, (4, 3)), zorder=1)
+    ax.set_xlim(lo, hi + extra)
+    ax.set_ylim(lo - extra, hi)
+    ax.set_aspect("equal", adjustable="box")
+    ax.xaxis.set_major_locator(MaxNLocator(5))
+    ax.yaxis.set_major_locator(MaxNLocator(5))
+    ax.set_xlabel("Read haplotagging recall (%%),\n%s" % st.REFERENCE_LABEL[a])
+    ax.set_ylabel("Read haplotagging recall (%%),\n%s" % st.REFERENCE_LABEL[b])
+    ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
+    ax.set_axisbelow(True)
+    ax.legend(handles=[Line2D([], [], color="none", marker="o", markerfacecolor=st.PLATFORM_COLOR[p],
+                              markeredgecolor="white",
+                              label="%s  %s" % (st.PLATFORM_LABEL[p],
+                                                ("%+.2f" % float(np.mean(gain[p]))).replace("-", "\u2212")))
+                       for p in st.PLATFORMS if p in gain],
+              title="%s \u2212 %s (pp)" % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]),
+              loc="lower right", borderaxespad=0.2, handletextpad=0.1, labelspacing=0.25)
+    legend_ax.legend(handles=[Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
+                                     markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in phasers],
+                     loc="center", ncol=3, borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
+    paper_title(fig, "Read haplotagging recall on %s against %s"
+                % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
+    return save(fig, ctx, "fig6e_reference_read_recall_matpat_by_platform")
 
 
 # (id, function, drawn once per reference?)
@@ -1477,7 +1630,7 @@ FIGURES = [
     ("fig1c", fig1c, True),
     ("fig2a", fig2a, True),
     ("fig2b", fig2b, True),
-    ("fig3", fig3, True),
+    ("fig3", fig3, False),
     ("fig4", fig4, True),
     ("fig5a", fig5a, True),
     ("fig5b", fig5b, True),
@@ -1491,6 +1644,7 @@ FIGURES = [
     ("fig6b", fig6b, False),
     ("fig6c", fig6c, False),
     ("fig6d", fig6d, False),
+    ("fig6e", fig6e, False),
     ("fig7a", fig7a, True),
     ("fig7b", fig7b, True),
     ("fig7c", fig7c, True),
