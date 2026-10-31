@@ -182,9 +182,10 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend):
         values = [v for v in drawn if finite(v)]
         lo, hi = min(values), max(values)
         span = max(hi - lo, 1.0)
-        bottom = max(0.0, lo - 0.5 * span)
-        axes[0].set_ylim(bottom, hi + 0.8 * span)
-        ticks = MaxNLocator(5).tick_values(bottom, min(hi + 0.8 * span, 100))
+        bottom = max(0.0, lo - 0.15 * span)
+        top = hi + 0.35 * span
+        axes[0].set_ylim(bottom, top)
+        ticks = MaxNLocator(5).tick_values(bottom, min(top, 100))
         axes[0].set_yticks([t for t in ticks if bottom <= t <= 100])
     top_legend(legend_ax, legend_patches(legend))
     return save(fig, ctx, name)
