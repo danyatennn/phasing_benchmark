@@ -54,6 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
@@ -175,9 +176,16 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend):
         raise NoData("no %s values" % tag)
     scale_axes(axes, drawn, log, ylabel)
     if tag.startswith("read_recall"):
-        # a recall stops at 100%; the room over it is for the bar labels
-        axes[0].set_ylim(0, 112)
-        axes[0].set_yticks(range(0, 101, 20))
+        # zoomed on the bars so the differences show: from under the lowest
+        # to over the highest, with room for the turned bar labels; no tick
+        # over 100%
+        values = [v for v in drawn if finite(v)]
+        lo, hi = min(values), max(values)
+        span = max(hi - lo, 1.0)
+        bottom = max(0.0, lo - 0.5 * span)
+        axes[0].set_ylim(bottom, hi + 0.8 * span)
+        ticks = MaxNLocator(5).tick_values(bottom, min(hi + 0.8 * span, 100))
+        axes[0].set_yticks([t for t in ticks if bottom <= t <= 100])
     top_legend(legend_ax, legend_patches(legend))
     return save(fig, ctx, name)
 
