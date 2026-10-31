@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
-from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter, LogLocator, MaxNLocator, NullLocator
 
 import style as st
 from data import NAN, ratio
@@ -408,6 +408,11 @@ def fig3(db, ctx, caller="truth"):
             xhi = FIG3_PACBIO_MAX
         ax.set_xlim(xlo, xhi)
         log_ticks(ax.xaxis, xlo, xhi)
+        # a panel is narrow: over a decade and more, 0.2 would touch 0.1
+        ticks = [v for v in (0.05, 0.1, 0.2, 0.5, 1, 2, 5) if xlo <= v <= xhi]
+        if xhi / xlo > 10 and 0.1 in ticks:
+            ticks.remove(0.2)
+        ax.xaxis.set_major_locator(FixedLocator(ticks))
         ax.set_yscale("log")
         lo, hi = min(ys) / 1.25, max(ys) * 1.25
         # fewer errors go up, so the best run sits in the top right corner
@@ -1564,8 +1569,9 @@ def fig6e(db, ctx):
     read haplotagging recall on GRCh38 along x and on T2T-CHM13 along y, the
     Q100 parental labels on the same reads for both (as fig6d). Colour is the
     platform, shape the phaser; over the diagonal T2T-CHM13 is better. Each
-    platform's legend entry carries the mean over its runs of T2T-CHM13 minus
-    GRCh38, in percentage points."""
+    platform's legend entry, under the plot, carries the mean over its runs of
+    the change on T2T-CHM13, 100 * (T2T-CHM13 / GRCh38 - 1) %, as the medians
+    of Fig. 1e."""
     recall = matpat_recall(db)
     if not recall:
         raise NoData("no metrics_reads/summary_recall_strata_matpat.tsv - run "
@@ -1573,7 +1579,7 @@ def fig6e(db, ctx):
     pairs = reference_pairs(db, lambda db, key: recall.get(key, NAN))
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     fig = plt.figure(figsize=panel_size("fig1d"), constrained_layout=True)
-    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.13])
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.62])
     ax = fig.add_subplot(grid[0])
     legend_ax = fig.add_subplot(grid[1])
     legend_ax.axis("off")
@@ -1587,19 +1593,14 @@ def fig6e(db, ctx):
             ax.scatter(xs, ys, s=8, color=st.PLATFORM_COLOR[platform], marker=st.PHASER_MARKER[phaser],
                        edgecolor="white", linewidth=0.3, alpha=0.9, zorder=3)
             seen += list(xs) + list(ys)
-            gain.setdefault(platform, []).extend(y - x for x, y in pts)
+            gain.setdefault(platform, []).extend(100 * (y / x - 1) for x, y in pts)
             if phaser not in phasers:
                 phasers.append(phaser)
     span = max(seen) - min(seen)
     lo, hi = min(seen) - 0.08 * span, max(seen) + 0.08 * span
-    # x reaches further right and y further down than the runs, by as much on
-    # both (the aspect stays equal), so the corner under the diagonal is free
-    # for the platform legend
-    extra = 0.7 * (hi - lo)
-    ax.plot([lo - extra, hi + extra], [lo - extra, hi + extra], color=st.MUTED, linewidth=0.6,
-            linestyle=(0, (4, 3)), zorder=1)
-    ax.set_xlim(lo, hi + extra)
-    ax.set_ylim(lo - extra, hi)
+    ax.plot([lo, hi], [lo, hi], color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
     ax.set_aspect("equal", adjustable="box")
     ax.xaxis.set_major_locator(MaxNLocator(5))
     ax.yaxis.set_major_locator(MaxNLocator(5))
@@ -1607,16 +1608,21 @@ def fig6e(db, ctx):
     ax.set_ylabel("Read haplotagging recall (%%),\n%s" % st.REFERENCE_LABEL[b])
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
-    ax.legend(handles=[Line2D([], [], color="none", marker="o", markerfacecolor=st.PLATFORM_COLOR[p],
-                              markeredgecolor="white",
-                              label="%s  %s" % (st.PLATFORM_LABEL[p],
-                                                ("%+.2f" % float(np.mean(gain[p]))).replace("-", "\u2212")))
-                       for p in st.PLATFORMS if p in gain],
-              title="%s \u2212 %s (pp)" % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]),
-              loc="lower right", borderaxespad=0.2, handletextpad=0.1, labelspacing=0.25)
+    # under the plot: the platforms with their mean gain, two to a row, over
+    # the phasers
+    first = legend_ax.legend(
+        handles=[Line2D([], [], color="none", marker="o", markerfacecolor=st.PLATFORM_COLOR[p],
+                        markeredgecolor="white",
+                        label="%s  %s" % (st.PLATFORM_LABEL[p],
+                                          ("%+.2f%%" % float(np.mean(gain[p]))).replace("-", "\u2212")))
+                 for p in st.PLATFORMS if p in gain],
+        loc="upper center", ncol=2, borderaxespad=0, handletextpad=0.1, columnspacing=0.8,
+        labelspacing=0.25)
+    legend_ax.add_artist(first)
     legend_ax.legend(handles=[Line2D([], [], color="none", marker=st.PHASER_MARKER[p], markerfacecolor=st.MUTED,
                                      markeredgecolor="white", label=st.PHASER_LABEL[p]) for p in phasers],
-                     loc="center", ncol=3, borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
+                     loc="lower center", ncol=3, borderaxespad=0, handletextpad=0.2, columnspacing=0.8,
+                     labelspacing=0.25)
     paper_title(fig, "Read haplotagging recall on %s against %s"
                 % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
     return save(fig, ctx, "fig6e_reference_read_recall_matpat_by_platform")
