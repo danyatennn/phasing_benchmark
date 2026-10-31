@@ -20,7 +20,11 @@ A  extra variants in the phaser input (bin/make_truth_variants.sh), 30x: the
 B  methylation (meth_run.sh), truth input, 30x: each phaser alone (pale), with
    MethPhaser on top of its VCF (solid), and LongPhase with its own 5mC mode
    (hatched)
-     figB1_switch_<ref>, figB2_hamming_<ref>, figB3_ng50_<ref>, figB4_reads_missed_<ref>
+     figB1_switch_<ref>, figB2_hamming_<ref>, figB3_ng50_<ref>,
+     figB4_read_recall_matpat_<ref>   read haplotagging recall: of the chr1-22
+                                      reads the matpat truth labels (alignment to
+                                      the Q100 parental copies, bin/readacc_truths.sh),
+                                      the share tagged to their haplotype
 C  assemblies (dipcall_run.sh) next to the read-based phasers on the truth
    input, one coverage (--asm-depth, 30x). An assembly brings its own SNPs
    (dipcall, inside dip.bed). hifiasm without parents is shown for the switch
@@ -93,6 +97,17 @@ METRICS = [
 READS_WRONG = ("reads_wrong", "Tagged reads on the\nwrong haplotype (%)", reads_wrong_pct, False)
 
 
+def read_recall_matpat_pct(db, key):
+    """reads tagged to their haplotype / reads the matpat truth labels"""
+    return 100 * db.get(key, "read_recall_var_matpat")
+
+
+# B scores reads against the Q100 parental copies, not the truth VCF's tags
+READ_RECALL_MATPAT = ("read_recall_matpat", "Read haplotagging recall (%)",
+                      read_recall_matpat_pct, False)
+METRICS_B = METRICS[:3] + [READ_RECALL_MATPAT]
+
+
 def fig_name(prefix, sample, ref):
     return "%s_%s" % (prefix, ref) if sample == "HG002" else "%s_%s_%s" % (prefix, sample, ref)
 
@@ -150,6 +165,10 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend):
         plt.close(fig)
         raise NoData("no %s values" % tag)
     scale_axes(axes, drawn, log, ylabel)
+    if tag.startswith("read_recall"):
+        # a recall stops at 100%; the room over it is for the bar labels
+        axes[0].set_ylim(0, 112)
+        axes[0].set_yticks(range(0, 101, 20))
     top_legend(legend_ax, legend_patches(legend))
     return save(fig, ctx, name)
 
@@ -388,7 +407,7 @@ def main():
                         results.append(run("A %s %s %s" % (sample, ref, label),
                                            draw, ctx, sample, ref, table, extra))
                 if "B" in only:
-                    for number, metric in enumerate(METRICS, 1):
+                    for number, metric in enumerate(METRICS_B, 1):
                         results.append(run("B %s %s %s" % (sample, ref, metric[0]),
                                            figB_metric, db, ctx, sample, ref, number, metric))
         if "C" in only:
