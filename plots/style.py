@@ -147,6 +147,7 @@ PAPER_PANELS = {
     "confidence": (80, 64),        # fig10d, under figR5
     "transitions": (96, 55),       # figR20 of one platform, beside fig10d
     "r18": (116, 77),              # figR18, under fig10d
+    "rescued": (84, 62),           # figR21
 }
 
 FONT_STACK = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]

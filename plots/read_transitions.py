@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """The state of each read on GRCh38 and on T2T-CHM13, the same reads, for one
 platform and coverage: how many reads go from each state on GRCh38 to each
-state on T2T-CHM13, per phaser. The numbers behind figR20 of
-plots/figures_summary.py.
+state on T2T-CHM13, per phaser, split by where the read lies. The numbers
+behind figR20 and figR21 of plots/figures_summary.py.
 
 Reads: those with a parental label (bin/matpat_truth.sh, PAT or MAT; the label
-does not depend on the reference) whose primary alignment is on chr1-22 on at
-least one reference. A read missing from the read table of a reference counts
-as unmapped there only if that cell's BAM has it unmapped (--unmapped-*);
-otherwise the downsampling of that cell did not draw it and the read is left
-out.
+does not depend on the reference) with a primary alignment in the read tables
+of both cells, on chr1-22 on at least one reference.
 
 State on a reference, the first rule that fits (as plots/read_classes.py):
-  unmapped   no alignment
   correct    tagged H1/H2 in a block of --min-snps phased het SNPs or more,
              on its parental haplotype once the block is oriented by its SNPs
              against the truth VCF (PAT/MAT put on the truth's haplotypes per
@@ -25,12 +21,17 @@ State on a reference, the first rule that fits (as plots/read_classes.py):
              primary alignment off chr1-22
 A tagged read in a block the truth cannot orient is left out (counted on stderr).
 
-Output, --out <file>: phaser grch38 t2t reads
+Region: "difficult" if half the read's T2T-CHM13 alignment or more lies in
+--difficult (all difficult regions of T2T-CHM13, the regions of the read
+recall), else "other" - one region for both references, as the read recall.
+
+Output, --out <file>: phaser grch38 t2t region reads
 
   python plots/read_transitions.py --run GRCh38 whatshap tags.tsv phased.vcf.gz \\
       --run T2T whatshap ... --labels reads/<cell>.matpat.tsv.gz \\
-      --reads-grch38 ... --unmapped-grch38 ... --alleles-grch38 ... --truth-vcf-grch38 ... \\
-      --truth-tags-grch38 ... --bench-grch38 ... (and the same for t2t) --out out.tsv
+      --reads-grch38 ... --alleles-grch38 ... --truth-vcf-grch38 ... \\
+      --truth-tags-grch38 ... --bench-grch38 ... (and the same for t2t) \\
+      --difficult prepared_auto/T2T_alldifficultregions.bed --out out.tsv
 """
 
 import argparse
@@ -43,8 +44,9 @@ from benchio import IntervalSet, haplotag_list, is_autosome, open_text, phased_h
 from read_classes import blocks_and_orientation
 
 MIN_MAPQ = 20
+STRATUM_FRACTION = 0.5
 REFS = ("GRCh38", "T2T")
-STATES = ["unmapped", "other", "no_snp", "outside", "lowmapq", "wrong", "correct"]
+STATES = ["other", "no_snp", "outside", "lowmapq", "wrong", "correct"]
 
 
 def parental_labels(paths):
@@ -70,14 +72,6 @@ def alignments(path, wanted):
             if f[0] in wanted:
                 out[f[0]] = (f[ic], int(f[i_s]), int(f[ie]), int(f[im]))
     return out
-
-
-def names(path, wanted):
-    """the wanted reads listed in a file of read names, one per line"""
-    if not path or not os.path.exists(path):
-        return set()
-    with open_text(path) as fh:
-        return {line.strip() for line in fh if line.strip() in wanted}
 
 
 def snps_per_read(path, wanted):
@@ -111,11 +105,11 @@ def main():
     for ref in REFS:
         k = ref.lower()
         ap.add_argument("--reads-%s" % k, required=True, help="read table of the %s cell" % ref)
-        ap.add_argument("--unmapped-%s" % k, default=None, help="names of the reads unmapped in the %s BAM" % ref)
         ap.add_argument("--alleles-%s" % k, required=True, help="<cell>_truth.reads.tsv.gz on %s" % ref)
         ap.add_argument("--truth-vcf-%s" % k, required=True)
         ap.add_argument("--truth-tags-%s" % k, required=True, help="<cell>_truthtags.tsv on %s" % ref)
         ap.add_argument("--bench-%s" % k, required=True, help="benchmark BED of %s" % ref)
+    ap.add_argument("--difficult", required=True, help="BED of all difficult regions of T2T-CHM13")
     ap.add_argument("--min-snps", type=int, default=2)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -133,25 +127,29 @@ def main():
 
     labels = parental_labels(args.labels)
     pos = {ref: alignments(opt("reads", ref), labels) for ref in REFS}
-    unmapped = {ref: names(opt("unmapped", ref), labels) for ref in REFS}
-    reads = [r for r in labels
-             if any(r in pos[ref] and is_autosome(pos[ref][r][0]) for ref in REFS)
-             and all(r in pos[ref] or r in unmapped[ref] for ref in REFS)]
-    print("%d labelled reads, %d on chr1-22 on a reference and drawn on both" % (len(labels), len(reads)),
+    reads = [r for r in labels if all(r in pos[ref] for ref in REFS)
+             and any(is_autosome(pos[ref][r][0]) for ref in REFS)]
+    print("%d labelled reads, %d aligned on both and on chr1-22 on a reference" % (len(labels), len(reads)),
           file=sys.stderr)
     wanted = set(reads)
     labels = {r: labels[r] for r in reads}
     snps = {ref: snps_per_read(opt("alleles", ref), wanted) for ref in REFS}
+
+    hard = IntervalSet.from_bed(args.difficult, autosomes_only=True)
+    region = {}
+    for r in reads:
+        c, start, end, _ = pos["T2T"][r]
+        inside = is_autosome(c) and hard.overlap(c, start, end) >= STRATUM_FRACTION * max(1, end - start)
+        region[r] = "difficult" if inside else "other"
+    del hard
 
     # what a read is on a reference, whatever the phaser: None when it can be tagged
     base = {}
     for ref in REFS:
         bench = IntervalSet.from_bed(opt("bench", ref), autosomes_only=True)
         for r in reads:
-            q = pos[ref].get(r)
-            if q is None:
-                s = "unmapped"
-            elif not is_autosome(q[0]):
+            q = pos[ref][r]
+            if not is_autosome(q[0]):
                 s = "other"
             elif q[3] < MIN_MAPQ:
                 s = "lowmapq"
@@ -168,8 +166,7 @@ def main():
         tags = haplotag_list(tags_path, autosomes_only=True)
         out = {}
         for r in reads:
-            q = pos[ref].get(r)
-            t = tags.get(r) if q is not None and is_autosome(q[0]) else None
+            t = tags.get(r) if is_autosome(pos[ref][r][0]) else None
             if t is not None and t[0] in ("H1", "H2") and size.get((t[2], t[1]), 0) >= args.min_snps:
                 f, s_ = flip.get((t[2], t[1])), swap.get(t[2])
                 if f is None or s_ is None:
@@ -200,17 +197,19 @@ def main():
             if a is None or b is None:
                 skipped += 1
                 continue
-            counts[(a, b)] = counts.get((a, b), 0) + 1
+            k = (a, b, region[r])
+            counts[k] = counts.get(k, 0) + 1
         for a in STATES:
             for b in STATES:
-                lines.append("%s\t%s\t%s\t%d\n" % (p, a, b, counts.get((a, b), 0)))
+                for reg in ("difficult", "other"):
+                    lines.append("%s\t%s\t%s\t%s\t%d\n" % (p, a, b, reg, counts.get((a, b, reg), 0)))
         n = sum(counts.values())
-        same = sum(v for (a, b), v in counts.items() if a == b)
+        same = sum(v for (a, b, _), v in counts.items() if a == b)
         print("%s: %d reads, %.2f%% in the same state on both, %d left out (block not oriented)"
               % (p, n, 100 * same / n if n else 0, skipped), file=sys.stderr)
     tmp = "%s.%d.tmp" % (args.out, os.getpid())
     with open(tmp, "w") as fh:
-        fh.write("phaser\tgrch38\tt2t\treads\n")
+        fh.write("phaser\tgrch38\tt2t\tregion\treads\n")
         fh.writelines(lines)
     os.replace(tmp, args.out)
     print("written %s" % args.out, file=sys.stderr)

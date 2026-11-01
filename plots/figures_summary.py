@@ -22,6 +22,8 @@
       error rate and mean VAF of the het SNPs per region, a bubble per platform
   figR20_read_transitions_<phaser>_<platform>_<depth>x   a read's state on
       GRCh38 against T2T-CHM13 (bin/read_transitions.sh), beside its figR5
+  figR21_reads_rescued_<phaser>_<depth>x   reads T2T-CHM13 puts on their
+      parental haplotype and GRCh38 does not, and those in difficult regions
 
 Input: the GIAB truth (--caller truth), so the phaser is the only variable.
 
@@ -1524,7 +1526,6 @@ def fig_r19(ctx):
 # T2T-CHM13 and one below it a read worse off (plots/read_transitions.py)
 # (state, row label, column label)
 TRANSITION_STATES = [
-    ("unmapped", "Unmapped", "Unmapped"),
     ("other", "Not haplotagged:\nother", "Other"),
     ("no_snp", "Not haplotagged:\nno het SNP", "No het SNP"),
     ("outside", "Not haplotagged:\noutside benchmark", "Outside benchmark"),
@@ -1532,6 +1533,17 @@ TRANSITION_STATES = [
     ("wrong", "Haplotagged,\nwrong haplotype", "Wrong haplotype"),
     ("correct", "Haplotagged,\ncorrect", "Correct"),
 ]
+
+
+def transition_counts(path, phaser):
+    """(GRCh38 state, T2T state) -> reads of a bin/read_transitions.sh table,
+    summed over the regions"""
+    counts = {}
+    for r in table(path):
+        if r.get("phaser") == phaser:
+            k = (r["grch38"], r["t2t"])
+            counts[k] = counts.get(k, 0) + num(r["reads"])
+    return counts
 
 
 def fig_r20(ctx):
@@ -1542,11 +1554,11 @@ def fig_r20(ctx):
     made = []
     for platform in st.PLATFORMS:
         path = path_of(ctx, "metrics_reads", "transitions", "%s_%dx_%s.tsv" % (platform, ctx.depth, ctx.caller))
-        counts = {(r["grch38"], r["t2t"]): num(r["reads"]) for r in table(path) if r.get("phaser") == ctx.phaser}
-        total = sum(counts.values())
+        counts = transition_counts(path, ctx.phaser)
+        m = np.array([[counts.get((a, b), 0) for b in keys] for a in keys], dtype=float)
+        total = m.sum()
         if not total:
             continue
-        m = np.array([[counts.get((a, b), 0) for b in keys] for a in keys], dtype=float)
         w, h = st.PAPER_PANELS["transitions"]
         fig, ax = plt.subplots(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
         shown = np.where(m > 0, m, np.nan)
@@ -1589,10 +1601,56 @@ def fig_r20(ctx):
     return ", ".join(made)
 
 
+# ------------------------------------- R21: reads rescued on T2T-CHM13
+
+PALE_BAR = 0.4
+
+def fig_r21(ctx):
+    """A pair of bars per platform, the same reads on both references
+    (bin/read_transitions.sh): the reads T2T-CHM13 puts on their parental
+    haplotype and GRCh38 does not (untagged or wrong there) - rescued - and
+    those of them in the difficult regions of T2T-CHM13."""
+    data = {}
+    for platform in st.PLATFORMS:
+        path = path_of(ctx, "metrics_reads", "transitions", "%s_%dx_%s.tsv" % (platform, ctx.depth, ctx.caller))
+        rescued = hard = 0
+        for r in table(path):
+            if r.get("phaser") == ctx.phaser and r["t2t"] == "correct" and r["grch38"] != "correct":
+                rescued += num(r["reads"])
+                hard += num(r["reads"]) if r.get("region") == "difficult" else 0
+        if rescued:
+            data[platform] = (rescued, hard)
+    if not data:
+        raise NoData("no metrics_reads/transitions/<platform>_%dx_%s.tsv with regions - run bin/read_transitions.sh"
+                     % (ctx.depth, ctx.caller))
+    platforms = [p for p in st.PLATFORMS if p in data]
+    w, h = st.PAPER_PANELS["rescued"]
+    fig, ax = plt.subplots(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    for x, p in enumerate(platforms):
+        rescued, hard = data[p]
+        for dx, v, alpha in ((-0.19, rescued, PALE_BAR), (0.19, hard, 1.0)):
+            ax.bar(x + dx, v, width=0.36, color=st.PLATFORM_COLOR[p], alpha=alpha, linewidth=0, zorder=3)
+            ax.annotate(short(v), (x + dx, v), xytext=(0, 1.5), textcoords="offset points", ha="center",
+                        va="bottom", fontsize=st.SMALL_FONT)
+    ax.set_xticks(range(len(platforms)))
+    ax.set_xticklabels([st.PLATFORM_LABEL[p] for p in platforms])
+    ax.tick_params(axis="x", length=0)
+    ax.set_xlim(-0.6, len(platforms) - 0.4)
+    ax.set_ylim(0, max(v for v, _ in data.values()) * 1.15)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: "%gk" % (v / 1000) if v else "0"))
+    ax.set_ylabel("Reads")
+    y_grid(ax)
+    handles = [Patch(color=st.MUTED, alpha=PALE_BAR, label="Rescued on T2T-CHM13"),
+               Patch(color=st.MUTED, label="Of them in difficult regions")]
+    fig.legend(handles=handles, loc="outside lower center", ncol=2, handlelength=1.2, columnspacing=1.2)
+    fig.suptitle("Reads rescued on T2T-CHM13")
+    return save(fig, ctx, "figR21_reads_rescued_%s_%dx" % (ctx.phaser, ctx.depth))
+
+
 FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10),
            ("R11", fig_r11), ("R12", fig_r12), ("R13", fig_r13),
            ("R14", fig_r14), ("R15", fig_r15), ("R16", fig_r16),
-           ("R17", fig_r17), ("R18", fig_r18), ("R19", fig_r19), ("R20", fig_r20)]
+           ("R17", fig_r17), ("R18", fig_r18), ("R19", fig_r19), ("R20", fig_r20), ("R21", fig_r21)]
 
 
 def main():
