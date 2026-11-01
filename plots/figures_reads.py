@@ -163,7 +163,8 @@ def fig_distribution(ctx, ref):
     share of reads with at least that many - the curve of a block-size plot.
     The SNP count does not depend on the phaser, so any one run will do."""
     data = load(ctx.root, ctx.sample, ref, ctx.depth, ctx.caller, "snps")
-    fig, ax = plt.subplots(figsize=(90 * st.MM, 70 * st.MM), constrained_layout=True)
+    w, h = st.PAPER_PANELS["snps_per_read"]
+    fig, ax = plt.subplots(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
     drawn, top = [], 0
     for platform in st.PLATFORMS:
         tables = [v for k, v in data.items() if k[0] == platform]
@@ -195,8 +196,8 @@ def fig_distribution(ctx, ref):
     ax.set_ylim(0, ctx.ymax if ctx.ymax else 1.15 * top)
     ax.set_xlabel("Cumulative share of reads")
     ax.set_ylabel(COUNT_LABEL["snps"])
-    ax.set_title("Het SNPs per read, %s, %dx" % (st.REFERENCE_LABEL[ref], ctx.depth))
-    ax.legend(loc="upper right")
+    fig.suptitle("Het SNPs per read")
+    ax.legend(loc="upper right", handlelength=1.2)
     y_grid(ax)
     return save(fig, ctx, "figR3c_snps_per_read_%s" % ref)
 

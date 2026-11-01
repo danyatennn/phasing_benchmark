@@ -912,7 +912,7 @@ def fig_r13(ctx):
                  lambda s_, p: 100 * mech.get((p, s_, "paralog_link_frac"), math.nan), False),
                 ("Mean |VAF − 0.5|", lambda s_, p: mech.get((p, s_, "vaf_dev"), math.nan), False),
             ]
-            fig = profile_figure(read_rows, strata, platforms, "Signs of paralogy in the reads by region", True)
+            fig = profile_figure(read_rows, strata, platforms, "Additional read metrics in different regions", True)
             made.append(save(fig, ctx, "figR13b_regions_reads_%s" % ref))
     if not made:
         raise NoData("no regions_statistics_<ref>.tsv - run regions_statistics.sh")
@@ -1277,11 +1277,12 @@ def fig_r17(ctx):
 
 # ---------------- R18: NG50 and haplotag accuracy, T2T against GRCh38
 
+# (metric, axis label, zoomed y, title)
 R18_METRICS = [
-    ("n50", "Block N50 in the region (Mb)", False),
-    ("accuracy", "Haplotag accuracy (%)", True),
-    ("recall", "Haplotag recall (%)", True),
-    ("recall_bases", "Haplotag recall, bases (%)", True),
+    ("n50", "Block N50 in the region (Mb)", False, "Phase-block N50 by region"),
+    ("accuracy", "Haplotag accuracy (%)", True, "Read haplotagging accuracy by region"),
+    ("recall", "Haplotag recall (%)", True, "Read haplotagging recall by region"),
+    ("recall_bases", "Haplotag recall, bases (%)", True, "Read haplotagging recall in bases by region"),
 ]
 
 
@@ -1326,8 +1327,7 @@ def r18_draw(ctx, by):
                 val[("recall",) + k] = 100 * num(r["correct"]) / tt
             if tb:
                 val[("recall_bases",) + k] = 100 * num(r["correct_bases"]) / tb
-        return r18_plot(ctx, by, val, "%s, T2T-CHM13 regions" % READ_TRUTH_LABEL[ctx.read_truth],
-                        "_" + ctx.read_truth)
+        return r18_plot(ctx, by, val, "_" + ctx.read_truth)
     for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv")):
         x = series(r)
         if x and int(float(r.get("depth", 0))) == ctx.depth:
@@ -1351,23 +1351,22 @@ def r18_draw(ctx, by):
                 val[("recall",) + k] = 100 * num(r["correct"]) / tt
             if tb == tb and tb:
                 val[("recall_bases",) + k] = 100 * num(r["correct_bases"]) / tb
-    return r18_plot(ctx, by, val, "", "")
+    return r18_plot(ctx, by, val, "")
 
 
-def r18_plot(ctx, by, val, how, sfx):
-    """the PDFs of r18_draw from its values; how goes into the title, sfx into the name"""
+def r18_plot(ctx, by, val, sfx):
+    """the PDFs of r18_draw from its values, at their size in the figure page
+    (st.PAPER_PANELS["r18"]); sfx goes into the name"""
     if by == "phaser":
         order, color, names = st.PHASERS, st.PHASER_COLOR, st.PHASER_LABEL
         applies = lambda p, x: st.applies(p, x)
-        fixed = "%s input" % st.CALLER_LABEL.get(ctx.caller, ctx.caller)
         tag = ctx.caller
     else:
         order, color, names = st.CALLERS, st.CALLER_COLOR, st.CALLER_LABEL
         applies = lambda p, x: True
-        fixed = st.PHASER_LABEL[ctx.phaser]
         tag = "inputs_%s" % ctx.phaser
     made = []
-    for metric, label, zoom in R18_METRICS:
+    for metric, label, zoom, title in R18_METRICS:
         keys = [k for k in val if k[0] == metric and val[k] == val[k]]
         strata = [(s_, l) for s_, l in [("genome", "Whole genome (chr1-22)")] + STRATA_R10
                   if any(k[4] == s_ for k in keys)]
@@ -1377,8 +1376,8 @@ def r18_plot(ctx, by, val, how, sfx):
         phasers = [ph for ph in order if any(k[3] == ph for k in keys)]
         ncols = min(4, len(strata))
         nrows = math.ceil(len(strata) / ncols)
-        fig, axes = plt.subplots(nrows, ncols, squeeze=False,
-                                 figsize=(st.FULL_WIDTH * st.MM, (26 + 52 * nrows) * st.MM),
+        w, h = st.PAPER_PANELS["r18"]
+        fig, axes = plt.subplots(nrows, ncols, squeeze=False, figsize=(w * st.MM, h * st.MM),
                                  layout="constrained")
         width = 0.84 / len(phasers)
         for n, (s_, slabel) in enumerate(strata):
@@ -1402,7 +1401,8 @@ def r18_plot(ctx, by, val, how, sfx):
             if lo > 0:
                 axis_break(ax)
             ax.set_xticks(range(len(platforms)))
-            ax.set_xticklabels([PLATFORM_TWO_LINES[p] for p in platforms], fontsize=st.FONT_SIZE - 1)
+            ax.set_xticklabels([st.PLATFORM_LABEL[p] for p in platforms], fontsize=st.SMALL_FONT,
+                               rotation=40, ha="right", rotation_mode="anchor")
             ax.set_xlim(-0.55, len(platforms) - 0.45)
             ax.set_title(slabel.replace("\n", " "))
             y_grid(ax)
@@ -1414,53 +1414,63 @@ def r18_plot(ctx, by, val, how, sfx):
         # an outline, so the reference key is not read as the grey of the truth input
         handles += [Patch(facecolor="white", edgecolor=st.INK, linewidth=0.8, label="T2T-CHM13 (bars)"),
                     Line2D([], [], color=st.INK, linewidth=1.3, label="GRCh38 (line)")]
-        fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
-        fig.suptitle("%s: T2T-CHM13 against GRCh38, %s, %dx%s" % (
-            label.replace(" (%)", "").replace(" (Mb)", ""), fixed, ctx.depth, ", " + how if how else ""))
+        fig.legend(handles=handles, loc="outside lower center", ncol=math.ceil(len(handles) / 2),
+                   frameon=False, handlelength=1.2, columnspacing=1.0)
+        fig.suptitle(title)
         made.append(save(fig, ctx, "figR18_refs_%s_%s_%dx%s" % (metric, tag, ctx.depth, sfx)))
     return ", ".join(made)
 
 # ------------------------------------- R19: switch errors and VAF by region
 
+BUBBLE_SIZES = [(1e4, "10k"), (1e5, "100k"), (5e5, "500k"), (1e6, "1M"), (2e6, "2M")]
+
+
 def bubble_size(n):
-    """marker area (pt^2) of a bubble for n het SNPs: its diameter grows by
-    one step per tenfold, so 1k and 1M both show"""
-    return 4 * max(math.log10(max(n, 1)) - 2, 0.3) ** 2
+    """marker area (pt^2) of a bubble for n het SNPs, by the square root of n
+    so that 10k and 2M both show"""
+    return max(3.0, 160 * math.sqrt(n / 2e6))
 
 
 def bubble_figure(values, strata, ylabel, title, hline=None, from_zero=False):
     """values: (platform, stratum) -> (y, het SNPs); a column per region, a
-    bubble per platform side by side, its area by the number of het SNPs."""
+    bubble per platform side by side, its area by the number of het SNPs;
+    under the plot a row of platforms and a row of sizes."""
     platforms = [p for p in st.PLATFORMS if any(k[0] == p for k in values)]
     w, h = st.PAPER_PANELS["bubbles"]
-    fig, ax = plt.subplots(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    step = 0.7 / max(1, len(platforms))
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.25])
+    ax, legend_ax = fig.add_subplot(grid[0]), fig.add_subplot(grid[1])
+    step = 0.18
     for si, (s_, _) in enumerate(strata):
         for j, p in enumerate(platforms):
             y, n = values.get((p, s_), (math.nan, 0))
             if y == y:
                 ax.scatter(si + (j - (len(platforms) - 1) / 2) * step, y, s=bubble_size(n),
-                           color=st.PLATFORM_COLOR[p], edgecolor="white", linewidth=0.3, zorder=3)
+                           color=st.PLATFORM_COLOR[p], alpha=0.9, edgecolor="white", linewidth=0.4,
+                           zorder=3)
     if hline is not None:
         ax.axhline(hline, color=st.MUTED, linestyle="--", linewidth=0.6, zorder=1)
     ax.set_xticks(range(len(strata)))
     ax.set_xticklabels([l for _, l in strata], rotation=30, ha="right", rotation_mode="anchor")
     ax.set_xlim(-0.6, len(strata) - 0.4)
-    ax.axvline(0.5, color=st.MUTED, linestyle=":", linewidth=0.6)
     ax.margins(y=0.15)
     if from_zero:
         ax.set_ylim(bottom=0)
     ax.set_ylabel(ylabel)
     y_grid(ax)
-    # a row of platforms over a row of sizes
-    handles = []
-    for p, (n, text) in zip(platforms, [(1e3, "1k"), (1e4, "10k"), (1e5, "100k"), (1e6, "1M")]):
-        handles.append(Line2D([], [], linestyle="", marker="o", markersize=4, color=st.PLATFORM_COLOR[p],
-                              markeredgecolor="white", label=st.PLATFORM_LABEL[p]))
-        handles.append(Line2D([], [], linestyle="", marker="o", markersize=math.sqrt(bubble_size(n)),
-                              color=st.MUTED, markeredgecolor="white", label="%s het SNPs" % text))
-    fig.legend(handles=handles, loc="outside lower center", ncol=len(platforms), handlelength=1.0,
-               columnspacing=1.0)
+    legend_ax.axis("off")
+    dot = lambda size, color, label: Line2D([], [], linestyle="", marker="o", markersize=math.sqrt(size),
+                                            color=color, markeredgecolor="white", label=label)
+    first = legend_ax.legend(handles=[dot(bubble_size(1e5), st.PLATFORM_COLOR[p], st.PLATFORM_LABEL[p])
+                                      for p in platforms],
+                             loc="upper center", ncol=len(platforms), handlelength=1.0, columnspacing=1.0,
+                             borderaxespad=0)
+    legend_ax.add_artist(first)
+    # the sizes after a "Het SNPs" with no marker, on one line
+    sizes = [Line2D([], [], linestyle="", label="Het SNPs:")]
+    sizes += [dot(bubble_size(n), st.MUTED, text) for n, text in BUBBLE_SIZES]
+    legend_ax.legend(handles=sizes, loc="lower center", ncol=len(sizes), handlelength=2.0, handletextpad=0.1,
+                     columnspacing=0.6, borderaxespad=0)
     fig.suptitle(title)
     return fig
 

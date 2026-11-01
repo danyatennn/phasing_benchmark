@@ -238,10 +238,10 @@ def fig10c(db, ctx, ref):
 
 
 CONF_TICK = {
-    "high": "High\n(2+ SNPs,\nall agree)",
-    "medium": "Medium\n(majority,\nsome against)",
+    "high": "High\n(all agree)",
+    "medium": "Medium\n(majority)",
     "single": "One SNP",
-    "tie": "Tie\n(as many\nfor each)",
+    "tie": "Tie",
 }
 
 
@@ -265,13 +265,13 @@ def fig10d(db, ctx, ref):
         raise NoData("no accuracy by confidence for %s at %dx" % (ref, depth))
     floor = min(shown) / 2
     matrix = [[floor if finite(v) and v <= 0 else v for v in line] for line in matrix]
-    fig, ax = plt.subplots(figsize=((62 + 18 * len(confs)) * st.MM, 100 * st.MM),
-                           constrained_layout=True)
+    fig, ax = plt.subplots(figsize=panel_size("confidence"), constrained_layout=True)
     im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows], [CONF_TICK[c] for c in confs],
-                 platform_groups(rows),
+                 platform_groups(rows, two_lines=True),
                  [("", len(confs))], label=lambda v: "0" if v <= floor else short_number(v),
                  cmap=st.SEQUENTIAL, norm=log_norm(shown + [floor]))
-    colorbar(fig, im, ax, "Tagged reads on the wrong haplotype (%%), %d×" % depth)
+    colorbar(fig, im, ax, "Haplotagged reads on the\nwrong haplotype (%%), %d×" % depth)
+    paper_title(fig, "Wrong haplotype by vote confidence")
     return save(fig, ctx, "fig10d_accuracy_by_confidence_%dx_%s" % (depth, ref))
 
 
@@ -327,7 +327,7 @@ def fig10e(db, ctx, ref, phaser="whatshap"):
     return ", ".join(written)
 
 
-def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None, title=None):
+def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None, title=None, size=None):
     depth = ctx.depth
     values = [value(pl, p, s) for pl in st.PLATFORMS for p in st.PHASERS for s in strata]
     values = [v for v in values if finite(v) and v > 0]
@@ -336,7 +336,7 @@ def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None, title=No
     # symmetric about 1, so depletion and enrichment get the same colour depth
     span = max(abs(math.log10(v)) for v in values) or 1
     return strata_heatmap(ctx, "%s_%dx_%s" % (name, depth, ref), strata, value,
-                          "%s, %d×" % (label, depth), note=note, title=title, cmap=DIVERGING,
+                          "%s, %d×" % (label, depth), note=note, title=title, size=size, cmap=DIVERGING,
                           norm=LogNorm(vmin=10 ** -span, vmax=10 ** span))
 
 
@@ -363,7 +363,7 @@ def fig11a(db, ctx, ref):
         lambda pl, p, s: switch_enrichment(db, (ref, "truth", pl, depth, p), s),
         "Switch error rate in the stratum,\nrelative to the genome",
         note=lambda pl, p, s: zero_note(db.stratum((ref, "truth", pl, depth, p), s)),
-        title="Switch error rate by region relative to the genome")
+        title="Switch error rate by region relative to the genome", size="enrichment")
 
 
 def fig11b(db, ctx, ref):

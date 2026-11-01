@@ -749,13 +749,16 @@ def platform_phaser_rows():
     return [(pl, p) for pl in st.PLATFORMS for p in st.PHASERS if st.applies(pl, p)]
 
 
-def platform_groups(rows):
-    """(label, number of rows) per platform, for the left-hand group labels"""
-    return [(st.PLATFORM_LABEL[pl], sum(1 for r in rows if r[0] == pl))
+def platform_groups(rows, two_lines=False):
+    """(label, number of rows) per platform, for the left-hand group labels;
+    two_lines: "PacBio\nSequel II", for a small heatmap whose groups are short"""
+    label = lambda pl: st.PLATFORM_LABEL[pl].replace(" ", "\n", 1) if two_lines else st.PLATFORM_LABEL[pl]
+    return [(label(pl), sum(1 for r in rows if r[0] == pl))
             for pl in st.PLATFORMS if any(r[0] == pl for r in rows)]
 
 
-def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, title=None, **image):
+def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, title=None, size=None,
+                   **image):
     """Platform x phaser down, one stratum per column: 16 rows of wide cells, so
     every value fits its cell. value(platform, phaser, stratum) -> number; NaN is
     hatched as not computed, 0 drawn in the lightest colour and written as 0.
@@ -763,7 +766,8 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, tit
     dotted, left uncoloured and carries the note instead of a value - for a
     count of zero or of too few errors to compare, so that it does not read as
     the best result of the figure. fmt(value) -> text overrides the
-    two significant figures written in a cell. title: the panel title over it."""
+    two significant figures written in a cell. title: the panel title over it;
+    size: a key of st.PAPER_PANELS."""
     rows = platform_phaser_rows()
     matrix = [[value(pl, p, s) for s in strata] for pl, p in rows]
     notes = [[note(pl, p, s) if note else None for s in strata] for pl, p in rows]
@@ -782,10 +786,10 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, tit
     matrix = [[floor if finite(v) and v <= 0 else v for v in line] for line in matrix]
     if "norm" not in image:
         image["norm"] = log_norm(shown + [floor])
-    fig, ax = plt.subplots(figsize=((62 + 13 * len(strata)) * st.MM, 100 * st.MM),
-                           constrained_layout=True)
+    figsize = panel_size(size) if size else ((62 + 13 * len(strata)) * st.MM, 100 * st.MM)
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     im = heatmap(ax, matrix, [st.PHASER_LABEL[p] for _, p in rows],
-                 [stratum_label(s) for s in strata], platform_groups(rows),
+                 [stratum_label(s) for s in strata], platform_groups(rows, two_lines=size is not None),
                  [("", len(strata))],
                  label=lambda v: "0.00" if v <= floor else (fmt or (lambda x: f"{x:.2f}"))(v), **image)
     for i, j, text in noted:
