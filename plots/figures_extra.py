@@ -238,8 +238,8 @@ def fig10c(db, ctx, ref):
 
 
 CONF_TICK = {
-    "high": "High\n(all agree)",
-    "medium": "Medium\n(majority)",
+    "high": "All agree",
+    "medium": "Majority",
     "single": "One SNP",
     "tie": "Tie",
 }
@@ -590,8 +590,14 @@ def fig7f(db, ctx, ref):
 
 # ------------------------------------------------------------- other samples
 
-# one neutral shade per sample, darkest first, so a sample never looks like a
-# platform or a phaser
+# a colour per family, the child darkest and the parents lighter: the Ashkenazi
+# trio in blues, the Han Chinese trio in reds, HG001 (no trio here) grey; the
+# samples in this order. A sample not listed takes a neutral shade.
+SAMPLE_COLOR = {
+    "HG002": "#1F4E79", "HG003": "#4F86B8", "HG004": "#9DC0E0",
+    "HG005": "#8E1F3A", "HG006": "#C8566F", "HG007": "#E8A3B1",
+    "HG001": "#7A7A7A",
+}
 SAMPLE_SHADES = ["#2C3A4B", "#6D7F92", "#B9C4CF", "#8C8C8C", "#D4D4D4"]
 
 
@@ -629,11 +635,14 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, depth=30, ref="GRCh38
         return positive(v) if log else v
 
     has = lambda sample, platform: any(finite(val(sample, platform, s)) for s in series_all)
-    samples = [s for s in dbs if any(has(s, p) for p in st.PLATFORMS)]
+    order = list(SAMPLE_COLOR)
+    samples = sorted((s for s in dbs if any(has(s, p) for p in st.PLATFORMS)),
+                     key=lambda s: (order.index(s) if s in order else len(order), s))
     platforms = [p for p in st.PLATFORMS if sum(has(s, p) for s in samples) >= 2]
     if not platforms:
         raise NoData("no platform with two samples at %dx" % depth)
-    color = {s: SAMPLE_SHADES[i % len(SAMPLE_SHADES)] for i, s in enumerate(samples)}
+    others = iter(SAMPLE_SHADES * len(samples))
+    color = {s: SAMPLE_COLOR[s] if s in SAMPLE_COLOR else next(others) for s in samples}
     fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 12)
     xs, w = offsets(len(samples))
     drawn = []

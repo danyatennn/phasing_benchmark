@@ -44,6 +44,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.colors import LinearSegmentedColormap, LogNorm
 from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as matplotlib_colors
 
 import style as st
@@ -121,7 +122,7 @@ def parental_rows(ctx):
 # in drawing order, clockwise from 12 o'clock: the small classes first, so
 # their labels share the roomy right side instead of crowding the top
 CLASSES = [
-    ("lowmapq_paralog", "Low MAPQ, paralogous region", "#9C3D2E", None),
+    ("lowmapq_paralog", "Low MAPQ, paralogous", "#9C3D2E", None),
     ("lowmapq_other", "Low MAPQ, elsewhere", "#DA9A82", None),
     ("snps_unphased", "Het SNPs, not phased", "#4F6D80", None),
     ("phased_unassigned", "Phased, no haplotype", "#B5C4CF", None),
@@ -143,7 +144,8 @@ def spread(labels, gap, low=-1.35, high=1.35):
     return [(y,) + t[1:] for y, t in zip(ys, labels)]
 
 
-def donut(ax, counts, center, min_label, min_slice, classes=None):
+def donut(ax, counts, center, min_label, min_slice, classes=None, with_counts=True):
+    """with_counts False: the slices labelled by their share only, for a small panel"""
     total = sum(counts.values())
     vals = [(k, col, hatch, counts.get(k, 0)) for k, _, col, hatch in (classes or CLASSES)
             if counts.get(k, 0) > 0]
@@ -165,7 +167,8 @@ def donut(ax, counts, center, min_label, min_slice, classes=None):
             continue
         ang = math.radians((w.theta1 + w.theta2) / 2)
         x, y = math.cos(ang), math.sin(ang)
-        sides[1 if x >= 0 else -1].append((1.15 * y, x, y, "%s (%.1f%%)" % (short(v[3]), 100 * share)))
+        text = "%s (%.1f%%)" % (short(v[3]), 100 * share) if with_counts else "%.1f%%" % (100 * share)
+        sides[1 if x >= 0 else -1].append((1.15 * y, x, y, text))
     for sign, labels in sides.items():
         for ty, x, y, text in spread(labels, 0.34, low=-1.45, high=1.45):
             # the line stops a few points short of the text
@@ -173,7 +176,8 @@ def donut(ax, counts, center, min_label, min_slice, classes=None):
                         ha="left" if sign > 0 else "right", va="center", color=st.INK,
                         fontsize=st.FONT_SIZE - 1,
                         arrowprops=dict(arrowstyle="-", color=st.MUTED, linewidth=0.5, shrinkA=4, shrinkB=0))
-    ax.set_xlim(-2.45, 2.45)
+    lim = 2.45 if with_counts else 1.95
+    ax.set_xlim(-lim, lim)
     ax.set_ylim(-1.45, 1.45)
     ax.set_aspect("equal")
     ax.axis("off")
@@ -246,8 +250,8 @@ def fig_r5(ctx):
         if not refs:
             continue
         w, h = st.PAPER_PANELS["donuts"]
-        fig, axes = plt.subplots(1, 2, figsize=(w * st.MM, h * st.MM))
-        fig.subplots_adjust(left=0.0, right=1.0, top=0.86, bottom=0.2, wspace=0.0)
+        fig, axes = plt.subplots(1, 2, figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+        fig.get_layout_engine().set(w_pad=0, h_pad=0.01, wspace=0)
         for ax, ref in zip(axes, st.REFERENCES):
             counts = data.get((platform, ref))
             if not counts:
@@ -257,12 +261,12 @@ def fig_r5(ctx):
             n, total = sum(part.values()), counts.get("all", math.nan)
             center = "%s\nuntagged\n(%.1f%%)" % (short(n), 100 * n / total) if total == total \
                 else "%s\nuntagged" % short(n)
-            donut(ax, part, center, ctx.min_label, ctx.min_slice)
-            ax.set_title(st.REFERENCE_LABEL[ref], pad=2)
+            donut(ax, part, center, ctx.min_label, ctx.min_slice, with_counts=False)
+            ax.set_title(st.REFERENCE_LABEL[ref], pad=0)
         handles = [Patch(facecolor=c, hatch=hh, edgecolor="white", label=l) for _, l, c, hh in CLASSES]
-        fig.legend(handles=handles, loc="lower center", ncol=3, bbox_to_anchor=(0.5, 0.0),
-                   handlelength=1.0, columnspacing=1.0)
-        fig.suptitle("Why %s reads are not haplotagged" % st.PLATFORM_LABEL[platform], y=0.98)
+        fig.legend(handles=handles, loc="outside lower center", ncol=2, handlelength=1.0,
+                   handletextpad=0.4, columnspacing=1.2)
+        fig.suptitle("Why %s reads are not haplotagged" % st.PLATFORM_LABEL[platform])
         made.append(save(fig, ctx, "figR5_untagged_reasons_%s_%s" % (ctx.phaser, platform)))
     if not made:
         raise NoData("no read classes for %s %s %dx" % (ctx.caller, ctx.phaser, ctx.depth))
@@ -1370,7 +1374,7 @@ def r18_plot(ctx, by, val, sfx):
     made = []
     for metric, label, zoom, title in R18_METRICS:
         keys = [k for k in val if k[0] == metric and val[k] == val[k]]
-        strata = [(s_, l) for s_, l in [("genome", "Whole genome (chr1-22)")] + STRATA_R10
+        strata = [(s_, l) for s_, l in [("genome", "Whole genome")] + STRATA_R10
                   if any(k[4] == s_ for k in keys)]
         if not strata:
             continue
@@ -1403,13 +1407,17 @@ def r18_plot(ctx, by, val, sfx):
             if lo > 0:
                 axis_break(ax)
             ax.set_xticks(range(len(platforms)))
-            ax.set_xticklabels([st.PLATFORM_LABEL[p] for p in platforms], fontsize=st.SMALL_FONT,
-                               rotation=40, ha="right", rotation_mode="anchor")
+            # the platforms under the bottom row only; the panels are small
+            if n // ncols == nrows - 1:
+                ax.set_xticklabels([st.PLATFORM_LABEL[p] for p in platforms], fontsize=st.SMALL_FONT,
+                                   rotation=40, ha="right", rotation_mode="anchor")
+            else:
+                ax.set_xticklabels([])
             ax.set_xlim(-0.55, len(platforms) - 0.45)
-            ax.set_title(slabel.replace("\n", " "))
+            ax.yaxis.set_major_locator(MaxNLocator(3))
+            ax.tick_params(axis="y", labelsize=st.SMALL_FONT)
+            ax.set_title(slabel.replace("\n", " "), pad=2)
             y_grid(ax)
-            if n % ncols == 0:
-                ax.set_ylabel(label)
         for n in range(len(strata), nrows * ncols):
             axes[n // ncols][n % ncols].axis("off")
         handles = [Patch(color=color[ph], label=names[ph]) for ph in phasers]
@@ -1418,6 +1426,7 @@ def r18_plot(ctx, by, val, sfx):
                     Line2D([], [], color=st.INK, linewidth=1.3, label="GRCh38 (line)")]
         fig.legend(handles=handles, loc="outside lower center", ncol=math.ceil(len(handles) / 2),
                    frameon=False, handlelength=1.2, columnspacing=1.0)
+        fig.supylabel(label, fontsize=st.FONT_SIZE)
         fig.suptitle(title)
         made.append(save(fig, ctx, "figR18_refs_%s_%s_%dx%s" % (metric, tag, ctx.depth, sfx)))
     return ", ".join(made)

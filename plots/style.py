@@ -142,11 +142,12 @@ PAPER_PANELS = {
     "regions_profile": (84, 80),   # figR13a beside figR13b
     "bubbles": (84, 58),           # figR19a beside figR19b
     "enrichment": (103, 90),       # fig11a, under the bubbles
-    "donuts": (100, 46),           # figR5 of one platform, GRCh38 beside T2T
-    "snps_per_read": (62, 44),     # figR3c, beside figR5
-    "confidence": (80, 64),        # fig10d, under figR5
-    "transitions": (96, 55),       # figR20 of one platform, beside fig10d
-    "r18": (116, 77),              # figR18, under fig10d
+    # the read page: R5 | R3c over fig10d | R20 over R18 | the ideogram
+    "donuts": (84, 38),            # figR5 of one platform, GRCh38 beside T2T
+    "snps_per_read": (84, 38),     # figR3c, beside figR5
+    "confidence": (70, 52),        # fig10d, under figR5
+    "transitions": (98, 52),       # figR20 of one platform, beside fig10d
+    "r18": (100, 56),              # figR18, under fig10d, beside the ideogram
     "rescued": (84, 62),           # figR21
 }
 
