@@ -13,7 +13,9 @@ A  extra variants in the phaser input (bin/make_truth_variants.sh), 30x: the
      figA1_switch_<ref>          switch error rate, chr1-22
      figA2_hamming_<ref>         blockwise Hamming error rate
      figA3_ng50_<ref>            block NG50 over chr1-22
-     figA4_reads_missed_<ref>    truth-tagged reads not tagged to their haplotype
+     figA4_read_recall_matpat_<ref>   read haplotagging recall, as figB4
+                                      (the same command with
+                                      PHASING_CALLERS="truthindel truthall")
      figA5_indels_phased_<ref>   input indels the phaser phased (bin/variants_eval.sh)
      figA6_indels_wrong_<ref>    oriented indels on the wrong haplotype
      figA7_reads_<ref>           reads tagged against the SNP input: gained, lost
@@ -115,6 +117,7 @@ def read_recall_matpat_pct(db, key):
 # B scores reads against the Q100 parental copies, not the truth VCF's tags
 READ_RECALL_MATPAT = ("read_recall_matpat", "Read haplotagging recall (%)",
                       read_recall_matpat_pct, False)
+METRICS_A = METRICS[:3] + [READ_RECALL_MATPAT]
 METRICS_B = METRICS[:3] + [READ_RECALL_MATPAT]
 
 
@@ -154,12 +157,15 @@ def group_panels(platforms, width, height, legend=True):
 
 
 # the panels of the paper: (st.PAPER_PANELS key, legend?, title) by file
-# prefix; any other file is as wide as the page with its legend, no title
+# prefix; any other file is as wide as the page with its legend, no title.
+# The legend goes under the last panel of each figure only (A4, B4).
 PAPER = {
-    "figA1": ("experiment", False, "Impact of additional variant types on switch error rates"),
-    "figA3": ("experiment_legend", True, "Impact of additional variant types on phase-block NG50"),
+    "figA1": ("experiment", False, "Impact of additional variant types on switch error rate"),
+    "figA3": ("experiment", False, "Impact of additional variant types on phase-block NG50"),
+    "figA4": ("experiment_legend", True, "Impact of additional variant types on read haplotagging recall"),
     "figB1": ("experiment", False, "Effect of DNA methylation integration on switch error rate"),
-    "figB3": ("experiment_legend", True, "Effect of DNA methylation integration on phase-block NG50"),
+    "figB3": ("experiment", False, "Effect of DNA methylation integration on phase-block NG50"),
+    "figB4": ("experiment_legend", True, "Effect of DNA methylation integration on read haplotagging recall"),
 }
 
 
@@ -434,7 +440,7 @@ def main():
             table = variants_table(ctx.root, sample) if "A" in only else {}
             for ref in refs:
                 if "A" in only:
-                    for number, metric in enumerate(METRICS, 1):
+                    for number, metric in enumerate(METRICS_A, 1):
                         results.append(run("A %s %s %s" % (sample, ref, metric[0]),
                                            figA_metric, db, ctx, sample, ref, number, metric, extra))
                     for label, draw in (("indels phased", figA5), ("indels wrong", figA6),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Summary figures of the paper, one PDF per subfigure, from the merged tables:
 
-  figR5_untagged_reasons_<phaser>      why the remaining reads are not tagged:
-      a donut per platform and reference, the untagged reads split by reason
+  figR5_untagged_reasons_<phaser>_<platform>   why the remaining reads are
+      not tagged: a donut per reference, the untagged reads split by reason
       (metrics_reads/summary_classes.tsv, 30x)
   figR6_<metric>_<ref>                 phasing rate (truth het SNPs phased in a
       block of two or more) and haplotag rate (reads tagged) as bars: a row per
@@ -16,6 +16,12 @@
   figR9_rescued_<platform>             reads untagged on GRCh38, and those of
       them that CHM13 tags, WhatsHap and LongPhase, as an UpSet plot
       (metrics_reads/rescue/, bin/rescue_reads.sh)
+  figR13a_regions_variants_<ref>, figR13b_regions_reads_<ref>   what each
+      region is, and what the reads of each platform see in it
+  figR19a_switch_bubbles_<phaser>_<ref>, figR19b_vaf_bubbles_<ref>   switch
+      error rate and mean VAF of the het SNPs per region, a bubble per platform
+  figR20_read_transitions_<phaser>_<platform>_<depth>x   a read's state on
+      GRCh38 against T2T-CHM13 (bin/read_transitions.sh), beside its figR5
 
 Input: the GIAB truth (--caller truth), so the phaser is the only variable.
 
@@ -223,7 +229,42 @@ def donut_figure(ctx, group_type, classes, center_word, title, name, share=True)
 
 
 def fig_r5(ctx):
-    return donut_figure(ctx, "class", CLASSES, "untagged", "Why reads stay untagged", "figR5_untagged_reasons")
+    """A figure per platform: the untagged reads by reason, GRCh38 left,
+    T2T-CHM13 right, the legend under them; figR20 goes beside it."""
+    rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+            if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
+            and r.get("phaser") == ctx.phaser and r.get("stratum") == "genome"
+            and r.get("group_type") in ("class", "all")]
+    data = {}
+    for r in rows:
+        data.setdefault((r["platform"], r["reference"]), {})[r["group"]] = num(r["reads"])
+    made = []
+    for platform in st.PLATFORMS:
+        refs = [ref for ref in st.REFERENCES if (platform, ref) in data]
+        if not refs:
+            continue
+        w, h = st.PAPER_PANELS["donuts"]
+        fig, axes = plt.subplots(1, 2, figsize=(w * st.MM, h * st.MM))
+        fig.subplots_adjust(left=0.0, right=1.0, top=0.86, bottom=0.2, wspace=0.0)
+        for ax, ref in zip(axes, st.REFERENCES):
+            counts = data.get((platform, ref))
+            if not counts:
+                ax.axis("off")
+                continue
+            part = {k: counts.get(k, 0) for k, *_ in CLASSES}
+            n, total = sum(part.values()), counts.get("all", math.nan)
+            center = "%s\nuntagged\n(%.1f%%)" % (short(n), 100 * n / total) if total == total \
+                else "%s\nuntagged" % short(n)
+            donut(ax, part, center, ctx.min_label, ctx.min_slice)
+            ax.set_title(st.REFERENCE_LABEL[ref], pad=2)
+        handles = [Patch(facecolor=c, hatch=hh, edgecolor="white", label=l) for _, l, c, hh in CLASSES]
+        fig.legend(handles=handles, loc="lower center", ncol=3, bbox_to_anchor=(0.5, 0.0),
+                   handlelength=1.0, columnspacing=1.0)
+        fig.suptitle("Why %s reads are not haplotagged" % st.PLATFORM_LABEL[platform], y=0.98)
+        made.append(save(fig, ctx, "figR5_untagged_reasons_%s_%s" % (ctx.phaser, platform)))
+    if not made:
+        raise NoData("no read classes for %s %s %dx" % (ctx.caller, ctx.phaser, ctx.depth))
+    return ", ".join(made)
 
 
 # --------------------------------------------- R11: SNP votes behind a read
@@ -784,7 +825,60 @@ def fig_r12(ctx):
 STRATUM_BAR = "#4A5C70"
 
 
+def profile_figure(rows, strata, platforms, title, by_platform):
+    """A row of bars per measure, a group per region. rows: (label, value,
+    log). by_platform False: value(stratum), a measure of the region itself,
+    one grey bar; True: value(stratum, platform), what the reads see, a bar
+    per platform and a platform legend."""
+    w, h = st.PAPER_PANELS["regions_profile"]
+    fig, axes = plt.subplots(len(rows), 1, squeeze=False, sharex=True, figsize=(w * st.MM, h * st.MM),
+                             constrained_layout=True)
+    width = 0.8 / max(1, len(platforms))
+    for ax, (label, value, log) in zip(axes[:, 0], rows):
+        values = []
+        for si, (s_, _) in enumerate(strata):
+            if not by_platform:
+                y = value(s_)
+                if y == y and (y > 0 or not log):
+                    values.append(y)
+                    ax.bar(si, y, width=0.55, color=STRATUM_BAR, linewidth=0, zorder=2)
+                    ax.annotate(tick_label(y), (si, y), xytext=(0, 1.5), textcoords="offset points",
+                                ha="center", va="bottom", fontsize=st.SMALL_FONT)
+                continue
+            for j, p in enumerate(platforms):
+                y = value(s_, p)
+                if y == y:
+                    values.append(y)
+                    ax.bar(si + (j - (len(platforms) - 1) / 2) * width, y, width=width * 0.9,
+                           color=st.PLATFORM_COLOR[p], linewidth=0, zorder=2)
+        if log and values:
+            # plain numbers on the log axis, not 10^x
+            ax.set_yscale("log")
+            lo, hi = min(values) / 2, max(values) * 4
+            ax.set_ylim(lo, hi)
+            log_ticks(ax.yaxis, lo, hi)
+        else:
+            ax.margins(y=0.25)
+        ax.set_ylabel(label)
+        y_grid(ax)
+        # easy regions apart from the difficult ones
+        ax.axvline(0.5, color=st.MUTED, linestyle=":", linewidth=0.6)
+    ax = axes[-1, 0]
+    ax.set_xticks(range(len(strata)))
+    ax.set_xticklabels([l for _, l in strata], rotation=30, ha="right", rotation_mode="anchor")
+    ax.set_xlim(-0.6, len(strata) - 0.4)
+    fig.align_ylabels(axes[:, 0])
+    if by_platform:
+        fig.legend(handles=[Patch(color=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p]) for p in platforms],
+                   loc="outside lower center", ncol=len(platforms), handlelength=1.0, columnspacing=1.0)
+    fig.suptitle(title)
+    return fig
+
+
 def fig_r13(ctx):
+    """Two panels per reference, to sit side by side: what a region is,
+    whatever the reads (figR13a), and what the reads of each platform see
+    in it (figR13b; bin/strata_mechanism.sh at --depth)."""
     made = []
     for ref in st.REFERENCES:
         stats = {r["stratum"]: r for r in table(path_of(ctx, "metrics_strata_auto",
@@ -801,71 +895,25 @@ def fig_r13(ctx):
         def stat(s_, col):
             return num(stats[s_].get(col))
 
-        def share(s_, col):
+        def indel_pct(s_):
             n = stat(s_, "src_variants")
-            return 100 * stat(s_, col) / n if n else math.nan
+            return 100 * stat(s_, "src_indel") / n if n else math.nan
 
-        # (label, per stratum value or None, per platform metric or None, log, scale)
-        rows = [
-            ("Size in the\nbenchmark (Mb)", lambda s_: stat(s_, "bp") / 1e6, None, True),
-            ("Truth het SNPs", lambda s_: stat(s_, "truth_het_snps"), None, True),
-            ("Het SNPs per Mb", lambda s_: stat(s_, "het_snps_per_mb"), None, False),
-            ("Median distance\nbetween het SNPs (bp)", lambda s_: stat(s_, "median_inter_snp_dist"), None, True),
-            ("Indels (% of\ntruth variants)", lambda s_: share(s_, "src_indel"), None, False),
-            ("1/2 genotypes (%\nof truth variants)", lambda s_: share(s_, "src_1_2"), None, False),
-            ("Mean |VAF − 0.5|", None, ("vaf_dev", 1), False),
-            ("Neighbouring SNP pairs\nwith >2 haplotypes (%)", None, ("paralog_link_frac", 100), False),
-            ("Depth / genome", None, ("depth_ratio", 1), False),
-            ("Depth with\nMAPQ < 20 (%)", None, ("lowmapq_frac", 100), False),
+        region_rows = [
+            ("Truth het\nSNPs", lambda s_: stat(s_, "truth_het_snps"), True),
+            ("Median distance\nbetween SNPs (bp)", lambda s_: stat(s_, "median_inter_snp_dist"), True),
+            ("Indels (% of\nvariants)", indel_pct, False),
         ]
-        rows = [r for r in rows if r[1] is not None or (platforms and any(
-            (p, s_, r[2][0]) in mech for p in platforms for s_, _ in strata))]
-        fig, axes = plt.subplots(len(rows), 1, squeeze=False, sharex=True,
-                                 figsize=(st.FULL_WIDTH * st.MM, (30 + 21 * len(rows)) * st.MM),
-                                 constrained_layout=True)
-        width = 0.8 / max(1, len(platforms))
-        for ax, (label, per_stratum, per_platform, log) in zip(axes[:, 0], rows):
-            values = []
-            if per_stratum is not None:
-                for si, (s_, _) in enumerate(strata):
-                    y = per_stratum(s_)
-                    if y == y and (y > 0 or not log):
-                        values.append(y)
-                        ax.bar(si, y, width=0.55, color=STRATUM_BAR, linewidth=0, zorder=2)
-                        ax.annotate(tick_label(y), (si, y), xytext=(0, 1.5), textcoords="offset points",
-                                    ha="center", va="bottom", fontsize=st.FONT_SIZE - 2)
-            else:
-                metric, scale = per_platform
-                for si, (s_, _) in enumerate(strata):
-                    for j, p in enumerate(platforms):
-                        y = mech.get((p, s_, metric), math.nan) * scale
-                        if y == y:
-                            ax.bar(si + (j - (len(platforms) - 1) / 2) * width, y, width=width * 0.9,
-                                   color=st.PLATFORM_COLOR[p], linewidth=0, zorder=2)
-                if metric == "depth_ratio":
-                    ax.axhline(1, color=st.MUTED, linestyle="--", linewidth=0.6)
-            if log and values:
-                # plain numbers on the log axis, not 10^x
-                ax.set_yscale("log")
-                lo, hi = min(values) / 2, max(values) * 4
-                ax.set_ylim(lo, hi)
-                log_ticks(ax.yaxis, lo, hi)
-            else:
-                ax.margins(y=0.25)
-            ax.set_ylabel(label, fontsize=st.FONT_SIZE - 1)
-            y_grid(ax)
-            ax.axvline(0.5, color=st.MUTED, linestyle=":", linewidth=0.6)
-        ax = axes[-1, 0]
-        ax.set_xticks(range(len(strata)))
-        ax.set_xticklabels([l for _, l in strata], rotation=30, ha="right", rotation_mode="anchor")
-        ax.set_xlim(-0.6, len(strata) - 0.4)
+        fig = profile_figure(region_rows, strata, platforms, "Variants by region", False)
+        made.append(save(fig, ctx, "figR13a_regions_variants_%s" % ref))
         if platforms:
-            axes[0, 0].legend(handles=[Patch(color=STRATUM_BAR, label="Region (same for every platform)")] +
-                              [Patch(color=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p]) for p in platforms],
-                              loc="lower center", bbox_to_anchor=(0.5, 1.15), ncol=3)
-        fig.suptitle("The genomic regions on %s: size, variants and what the reads see (%dx)" % (
-            st.REFERENCE_LABEL[ref], ctx.depth))
-        made.append(save(fig, ctx, "figR13_regions_profile_%s" % ref))
+            read_rows = [
+                ("Neighbouring SNP pairs\nwith >2 haplotypes (%)",
+                 lambda s_, p: 100 * mech.get((p, s_, "paralog_link_frac"), math.nan), False),
+                ("Mean |VAF − 0.5|", lambda s_, p: mech.get((p, s_, "vaf_dev"), math.nan), False),
+            ]
+            fig = profile_figure(read_rows, strata, platforms, "Signs of paralogy in the reads by region", True)
+            made.append(save(fig, ctx, "figR13b_regions_reads_%s" % ref))
     if not made:
         raise NoData("no regions_statistics_<ref>.tsv - run regions_statistics.sh")
     return ", ".join(made)
@@ -1372,10 +1420,168 @@ def r18_plot(ctx, by, val, how, sfx):
         made.append(save(fig, ctx, "figR18_refs_%s_%s_%dx%s" % (metric, tag, ctx.depth, sfx)))
     return ", ".join(made)
 
+# ------------------------------------- R19: switch errors and VAF by region
+
+def bubble_size(n):
+    """marker area (pt^2) of a bubble for n het SNPs: its diameter grows by
+    one step per tenfold, so 1k and 1M both show"""
+    return 4 * max(math.log10(max(n, 1)) - 2, 0.3) ** 2
+
+
+def bubble_figure(values, strata, ylabel, title, hline=None, from_zero=False):
+    """values: (platform, stratum) -> (y, het SNPs); a column per region, a
+    bubble per platform side by side, its area by the number of het SNPs."""
+    platforms = [p for p in st.PLATFORMS if any(k[0] == p for k in values)]
+    w, h = st.PAPER_PANELS["bubbles"]
+    fig, ax = plt.subplots(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    step = 0.7 / max(1, len(platforms))
+    for si, (s_, _) in enumerate(strata):
+        for j, p in enumerate(platforms):
+            y, n = values.get((p, s_), (math.nan, 0))
+            if y == y:
+                ax.scatter(si + (j - (len(platforms) - 1) / 2) * step, y, s=bubble_size(n),
+                           color=st.PLATFORM_COLOR[p], edgecolor="white", linewidth=0.3, zorder=3)
+    if hline is not None:
+        ax.axhline(hline, color=st.MUTED, linestyle="--", linewidth=0.6, zorder=1)
+    ax.set_xticks(range(len(strata)))
+    ax.set_xticklabels([l for _, l in strata], rotation=30, ha="right", rotation_mode="anchor")
+    ax.set_xlim(-0.6, len(strata) - 0.4)
+    ax.axvline(0.5, color=st.MUTED, linestyle=":", linewidth=0.6)
+    ax.margins(y=0.15)
+    if from_zero:
+        ax.set_ylim(bottom=0)
+    ax.set_ylabel(ylabel)
+    y_grid(ax)
+    # a row of platforms over a row of sizes
+    handles = []
+    for p, (n, text) in zip(platforms, [(1e3, "1k"), (1e4, "10k"), (1e5, "100k"), (1e6, "1M")]):
+        handles.append(Line2D([], [], linestyle="", marker="o", markersize=4, color=st.PLATFORM_COLOR[p],
+                              markeredgecolor="white", label=st.PLATFORM_LABEL[p]))
+        handles.append(Line2D([], [], linestyle="", marker="o", markersize=math.sqrt(bubble_size(n)),
+                              color=st.MUTED, markeredgecolor="white", label="%s het SNPs" % text))
+    fig.legend(handles=handles, loc="outside lower center", ncol=len(platforms), handlelength=1.0,
+               columnspacing=1.0)
+    fig.suptitle(title)
+    return fig
+
+
+def fig_r19(ctx):
+    """Two panels per reference, to sit side by side: the switch error rate
+    in each region (--phaser, --caller input, --depth; a bubble per platform,
+    its size the het SNP pairs assessed) and the mean VAF of the truth het
+    SNPs there as the reads see it (bin/vaf_strata.sh; its size the SNPs
+    with 5 reads or more) - where reads of another copy pull the VAF of a het
+    SNP below 0.5, the switch errors gather."""
+    made = []
+    strata_rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv"))
+                   if r.get("caller") == ctx.caller and r.get("phaser") == ctx.phaser
+                   and int(float(r.get("depth", 0))) == ctx.depth]
+    for ref in st.REFERENCES:
+        switch = {}
+        for r in strata_rows:
+            n = num(r["assessed"])
+            if r["reference"] == ref and n > 0:
+                switch[(r["platform"], r["stratum"])] = (100 * num(r["switches"]) / n, n)
+        strata = [(s_, l) for s_, l in STRATA_R10 if any(k[1] == s_ for k in switch)]
+        if strata:
+            fig = bubble_figure(switch, strata, "Switch error rate (%)", "Switch error rate by region",
+                                from_zero=True)
+            made.append(save(fig, ctx, "figR19a_switch_bubbles_%s_%s" % (ctx.phaser, ref)))
+        sums = {}
+        for r in table(path_of(ctx, "metrics_strata_auto", "vaf_%s.tsv" % ref)):
+            if r.get("depth") != str(ctx.depth) or r.get("input") != "truth":
+                continue
+            sites = num(r["sites"])
+            mid = (num(r["vaf_lo"]) + num(r["vaf_hi"])) / 2
+            acc = sums.setdefault((r["platform"], r["stratum"]), [0.0, 0.0])
+            acc[0] += mid * sites
+            acc[1] += sites
+        vaf = {k: (a / n, n) for k, (a, n) in sums.items() if n > 0}
+        strata = [(s_, l) for s_, l in STRATA_R10 if any(k[1] == s_ for k in vaf)]
+        if strata:
+            fig = bubble_figure(vaf, strata, "Mean VAF of het SNPs", "Mean VAF of het SNPs by region", hline=0.5)
+            made.append(save(fig, ctx, "figR19b_vaf_bubbles_%s" % ref))
+    if not made:
+        raise NoData("no summary_phase_strata.tsv rows for %s %s %dx and no vaf_<ref>.tsv"
+                     % (ctx.caller, ctx.phaser, ctx.depth))
+    return ", ".join(made)
+
+
+# ---------------------------- R20: a read's state on GRCh38 and on T2T-CHM13
+
+# from worst to best, so a cell above the diagonal is a read better off on
+# T2T-CHM13 and one below it a read worse off (plots/read_transitions.py)
+# (state, row label, column label)
+TRANSITION_STATES = [
+    ("unmapped", "Unmapped", "Unmapped"),
+    ("other", "Not haplotagged:\nother", "Other"),
+    ("no_snp", "Not haplotagged:\nno het SNP", "No het SNP"),
+    ("outside", "Not haplotagged:\noutside benchmark", "Outside benchmark"),
+    ("lowmapq", "Not haplotagged:\nMAPQ < 20", "MAPQ < 20"),
+    ("wrong", "Haplotagged,\nwrong haplotype", "Wrong haplotype"),
+    ("correct", "Haplotagged,\ncorrect", "Correct"),
+]
+
+
+def fig_r20(ctx):
+    """A matrix per platform: rows the read's state on GRCh38, columns on
+    T2T-CHM13, the same reads; colour the number of reads (log), the text its
+    share of all of them. metrics_reads/transitions/ of bin/read_transitions.sh."""
+    keys = [k for k, _, _ in TRANSITION_STATES]
+    made = []
+    for platform in st.PLATFORMS:
+        path = path_of(ctx, "metrics_reads", "transitions", "%s_%dx_%s.tsv" % (platform, ctx.depth, ctx.caller))
+        counts = {(r["grch38"], r["t2t"]): num(r["reads"]) for r in table(path) if r.get("phaser") == ctx.phaser}
+        total = sum(counts.values())
+        if not total:
+            continue
+        m = np.array([[counts.get((a, b), 0) for b in keys] for a in keys], dtype=float)
+        w, h = st.PAPER_PANELS["transitions"]
+        fig, ax = plt.subplots(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+        shown = np.where(m > 0, m, np.nan)
+        norm = LogNorm(vmin=max(1, np.nanmin(shown)), vmax=np.nanmax(shown))
+        im = ax.imshow(shown, cmap=st.SEQUENTIAL, norm=norm, aspect="auto")
+        for i in range(len(keys)):
+            for j in range(len(keys)):
+                pct = 100 * m[i, j] / total
+                if m[i, j] == 0:
+                    text = "0"
+                elif pct < 0.01:
+                    text = "<0.01"
+                else:
+                    text = "%.2g" % pct if pct < 10 else "%.0f" % pct
+                dark = m[i, j] > 0 and norm(m[i, j]) > 0.6
+                ax.text(j, i, text, ha="center", va="center", fontsize=st.CELL_FONT,
+                        color="white" if dark else st.INK)
+        # the reads that do not change
+        for i in range(len(keys)):
+            ax.add_patch(plt.Rectangle((i - 0.5, i - 0.5), 1, 1, fill=False, edgecolor=st.INK, linewidth=0.6))
+        ax.set_xticks(range(len(keys)))
+        ax.set_xticklabels([c for _, _, c in TRANSITION_STATES], rotation=45, ha="right",
+                           rotation_mode="anchor", fontsize=st.SMALL_FONT)
+        ax.set_yticks(range(len(keys)))
+        ax.set_yticklabels([r for _, r, _ in TRANSITION_STATES], fontsize=st.SMALL_FONT)
+        ax.tick_params(length=0)
+        for side in ax.spines.values():
+            side.set_visible(False)
+        ax.set_xlabel("T2T-CHM13")
+        ax.set_ylabel("GRCh38")
+        bar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        bar.set_label("Reads")
+        bar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: short(v)))
+        bar.outline.set_linewidth(0.4)
+        fig.suptitle("Read states from GRCh38 to T2T-CHM13")
+        made.append(save(fig, ctx, "figR20_read_transitions_%s_%s_%dx" % (ctx.phaser, platform, ctx.depth)))
+    if not made:
+        raise NoData("no metrics_reads/transitions/<platform>_%dx_%s.tsv - run bin/read_transitions.sh"
+                     % (ctx.depth, ctx.caller))
+    return ", ".join(made)
+
+
 FIGURES = [("R5", fig_r5), ("R6", fig_r6), ("R7", fig_r7), ("R8", fig_r8), ("R9", fig_r9), ("R10", fig_r10),
            ("R11", fig_r11), ("R12", fig_r12), ("R13", fig_r13),
            ("R14", fig_r14), ("R15", fig_r15), ("R16", fig_r16),
-           ("R17", fig_r17), ("R18", fig_r18)]
+           ("R17", fig_r17), ("R18", fig_r18), ("R19", fig_r19), ("R20", fig_r20)]
 
 
 def main():
@@ -1386,7 +1592,7 @@ def main():
     ap.add_argument("--only", default="", help="R5,R6,R7,R8,R9")
     ap.add_argument("--caller", default="truth", help="phaser input")
     ap.add_argument("--depth", type=int, default=30)
-    ap.add_argument("--phaser", default="whatshap", help="phaser of R5")
+    ap.add_argument("--phaser", default="whatshap", help="phaser of R5, R19, R20")
     ap.add_argument("--phasers", default="whatshap longphase margin hapcut2 hiphase", help="R6, R7")
     ap.add_argument("--tagged-unit", choices=["reads", "bases"], default="reads", help="R6")
     ap.add_argument("--stratum", default="alldifficultregions", help="end point of R7")

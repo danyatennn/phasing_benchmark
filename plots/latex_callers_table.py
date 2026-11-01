@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """LaTeX three-line table (booktabs: top, header and bottom rules only) of the
 variant callers per genomic region at one coverage, one table per reference:
-het SNP calling precision, recall and F1, the share of truth het SNPs, the
-NG50 and the read haplotag recall the caller's SNPs give one phaser. Every number is recomputed from its counts and
-checked before it is written; a mismatch stops the script (--force writes
+het SNP calling precision, recall and F1, and the share of truth het SNPs
+phased and the read haplotag recall the caller's SNPs give one phaser. Every
+number is recomputed from its counts and checked before it is written; a mismatch stops the script (--force writes
 anyway).
 
   Calling          precision = shared / emitted, recall = shared / truth
@@ -14,9 +14,6 @@ anyway).
                    truth het SNPs (whatshap compare covered_variants)
                    regions: metrics_strata_auto/summary_phase_strata.tsv
                    whole genome (chr1-22): metrics/<run>.auto.tsv
-  NG50             block NG50 over chr1-22 (metrics/<run>.ng50.tsv,
-                   plots/ng50_autosomes.py), whole genome only: a block has
-                   no NG50 inside a region
   Haplotag recall  reads put on their own parental haplotype / reads the
                    truth labels (metrics_reads/summary_recall_strata_<truth>.tsv,
                    bin/read_recall_strata.sh READ_TRUTH=<truth>): primary
@@ -50,9 +47,8 @@ REGIONS = [
 ]
 PLATFORM_TEX = {"ont4k": "ONT 4 kHz", "ont5k": "ONT 5 kHz", "hifi": "PacBio Sequel II",
                 "revio": "PacBio Revio"}
-METRICS = ["P", "R", "F1", "Ph", "NG50", "HR"]
-DECIMALS = {"NG50": 2}       # Mb; the rest take --decimals
-PHASE_METRICS = {"Ph", "NG50", "HR"}     # the GIAB truth row has these
+METRICS = ["P", "R", "F1", "Ph", "HR"]
+PHASE_METRICS = {"Ph", "HR"}     # the GIAB truth row has these
 TOL = 6e-4          # the TSVs carry 6 decimals
 TRUTH_TEX = {"matpat": "the parental copy of the HG002 Q100 assembly they align to better",
              "yak": "parental $k$-mers", "truthtags": "the GIAB truth VCF"}
@@ -150,7 +146,7 @@ def haplotag(base, truth, phaser, depth, problems):
 
 
 def phasing(base, root, sample, refs, phaser, depth, problems):
-    """(ref, caller, platform, region) -> {"Ph": %, "NG50": Mb (genome only)};
+    """(ref, caller, platform, region) -> {"Ph": %};
     the truth behind the share phased is the same for every input of a cell"""
     out, denom = {}, {}
 
@@ -172,18 +168,15 @@ def phasing(base, root, sample, refs, phaser, depth, problems):
         k = (ref, caller, platform, depth, phaser)
         key = (ref, caller, platform, "genome")
         put(key, db.get(k, "covered"), db.get(k, "truth_total"))
-        ng50 = db.get(k, "block_ng50")
-        if ng50 == ng50:
-            out.setdefault(key, {})["NG50"] = ng50 / 1e6
     for side, n in denom.items():
         if len(n) > 1:
             problems.append("phasing %s: truth het SNPs differ between inputs: %s" % (side, sorted(n)))
     return out
 
 
-def fmt(v, best, decimals, blank=False):
+def fmt(v, best, decimals):
     if v is None:
-        return "" if blank else "\\multicolumn{1}{c}{--}"
+        return "\\multicolumn{1}{c}{--}"
     text = "%.*f" % (decimals, v)
     return "\\textbf{%s}" % text if best else text
 
@@ -212,8 +205,7 @@ def table(ref, platforms, values, regions, callers, args):
         "\\caption{Het SNP calling, phasing and read haplotagging across genomic regions, %s, "
         "%d$\\times$, %s. P, R, F1: precision, recall and F1 (\\%%) of the caller's biallelic het SNPs "
         "against the GIAB truth inside the benchmark regions. Ph: share (\\%%) of the truth het SNPs of "
-        "the region that the phaser put in a phase block of $\\geq$2 SNPs. NG50: phase block NG50 (Mb) "
-        "over chr1--22, given for the whole genome only. HR: haplotag recall (\\%%), the share of "
+        "the region that the phaser put in a phase block of $\\geq$2 SNPs. HR: haplotag recall (\\%%), the share of "
         "labelled reads that the phaser, given the caller's SNPs, puts on their true parental haplotype; "
         "reads labelled by %s, primary alignments present on both references with $\\geq$2 truth het "
         "SNPs, assigned to regions by their T2T-CHM13 alignment, so each platform has the same reads on "
@@ -241,13 +233,13 @@ def table(ref, platforms, values, regions, callers, args):
                 v = values.get((ref, c, p, region), {})
                 for m in METRICS:
                     x = v.get(m)
-                    d = DECIMALS.get(m, args.decimals)
+                    d = args.decimals
                     col = [values.get((ref, y, p, region), {}).get(m) for y in callers if y != "truth"]
                     col = [y for y in col if y is not None]
                     # best as printed: ties at the shown precision are all bold
                     best = (c != "truth" and x is not None and len(col) > 1
                             and round(x, d) == round(max(col), d))
-                    row.append(fmt(x, best, d, blank=(m == "NG50" and region != "genome")))
+                    row.append(fmt(x, best, d))
             lines.append(" & ".join(row) + (" \\\\*" if ci < len(callers) - 1 else " \\\\"))
     lines += ["\\end{longtable}", "}", "\\end{landscape}", ""]
     return "\n".join(lines)
@@ -260,7 +252,7 @@ def main():
     ap.add_argument("--depth", type=int, default=30)
     ap.add_argument("--phaser", default="whatshap", help="phaser behind HR")
     ap.add_argument("--read-truth", choices=["matpat", "yak", "truthtags"], default="matpat")
-    ap.add_argument("--decimals", type=int, default=1, help="for P, R, F1, Ph, HR; NG50 has 2")
+    ap.add_argument("--decimals", type=int, default=1, help="1 fits A4 landscape")
     ap.add_argument("--refs", default=" ".join(st.REFERENCES))
     ap.add_argument("--out", default=None, help="default: print")
     ap.add_argument("--force", action="store_true", help="write even if a check fails")
@@ -301,7 +293,7 @@ def main():
         callers = [c for c in st.CALLERS if any(k[0] == ref and k[1] == c for k in values)]
         out.append(table(ref, platforms, values, regions, callers, args))
         holes = [(c, p, s_, m) for c in callers for p in platforms for s_, _ in regions for m in METRICS
-                 if not (c == "truth" and m not in PHASE_METRICS) and not (m == "NG50" and s_ != "genome")
+                 if not (c == "truth" and m not in PHASE_METRICS)
                  and m not in values.get((ref, c, p, s_), {})]
         if holes:
             print("%s: %d cells without a value (written as --), e.g. %s" % (ref, len(holes), holes[:3]),

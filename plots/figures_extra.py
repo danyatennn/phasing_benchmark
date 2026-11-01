@@ -327,7 +327,7 @@ def fig10e(db, ctx, ref, phaser="whatshap"):
     return ", ".join(written)
 
 
-def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None):
+def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None, title=None):
     depth = ctx.depth
     values = [value(pl, p, s) for pl in st.PLATFORMS for p in st.PHASERS for s in strata]
     values = [v for v in values if finite(v) and v > 0]
@@ -336,7 +336,7 @@ def enrichment_heatmap(ctx, ref, name, strata, value, label, note=None):
     # symmetric about 1, so depletion and enrichment get the same colour depth
     span = max(abs(math.log10(v)) for v in values) or 1
     return strata_heatmap(ctx, "%s_%dx_%s" % (name, depth, ref), strata, value,
-                          "%s, %d×" % (label, depth), note=note, cmap=DIVERGING,
+                          "%s, %d×" % (label, depth), note=note, title=title, cmap=DIVERGING,
                           norm=LogNorm(vmin=10 ** -span, vmax=10 ** span))
 
 
@@ -362,7 +362,8 @@ def fig11a(db, ctx, ref):
         ctx, ref, "fig11a_switch_enrichment", db.strata_names(),
         lambda pl, p, s: switch_enrichment(db, (ref, "truth", pl, depth, p), s),
         "Switch error rate in the stratum,\nrelative to the genome",
-        note=lambda pl, p, s: zero_note(db.stratum((ref, "truth", pl, depth, p), s)))
+        note=lambda pl, p, s: zero_note(db.stratum((ref, "truth", pl, depth, p), s)),
+        title="Switch error rate by region relative to the genome")
 
 
 def fig11b(db, ctx, ref):

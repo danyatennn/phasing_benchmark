@@ -755,7 +755,7 @@ def platform_groups(rows):
             for pl in st.PLATFORMS if any(r[0] == pl for r in rows)]
 
 
-def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **image):
+def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, title=None, **image):
     """Platform x phaser down, one stratum per column: 16 rows of wide cells, so
     every value fits its cell. value(platform, phaser, stratum) -> number; NaN is
     hatched as not computed, 0 drawn in the lightest colour and written as 0.
@@ -763,7 +763,7 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **i
     dotted, left uncoloured and carries the note instead of a value - for a
     count of zero or of too few errors to compare, so that it does not read as
     the best result of the figure. fmt(value) -> text overrides the
-    two significant figures written in a cell."""
+    two significant figures written in a cell. title: the panel title over it."""
     rows = platform_phaser_rows()
     matrix = [[value(pl, p, s) for s in strata] for pl, p in rows]
     notes = [[note(pl, p, s) if note else None for s in strata] for pl, p in rows]
@@ -794,6 +794,7 @@ def strata_heatmap(ctx, name, strata, value, bar_label, note=None, fmt=None, **i
         ax.text(j, i, text, ha="center", va="center", color=st.MUTED, style="italic", zorder=3)
     plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
     colorbar(fig, im, ax, bar_label)
+    paper_title(fig, title)
     return save(fig, ctx, name)
 
 
