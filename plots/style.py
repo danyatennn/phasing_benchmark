@@ -141,10 +141,10 @@ PAPER_PANELS = {
     "experiment_legend": (PAGE_WIDTH, 68),  # Fig. 3b, 3d
     "regions_profile": (84, 80),   # figR13a beside figR13b
     "bubbles": (84, 58),           # figR19a beside figR19b
-    "enrichment": (103, 58),       # fig11a, under the bubbles
+    "enrichment": (103, 90),       # fig11a, under the bubbles
     "donuts": (100, 46),           # figR5 of one platform, GRCh38 beside T2T
     "snps_per_read": (62, 44),     # figR3c, beside figR5
-    "confidence": (73, 55),        # fig10d, under figR5
+    "confidence": (80, 64),        # fig10d, under figR5
     "transitions": (96, 55),       # figR20 of one platform, beside fig10d
     "r18": (116, 77),              # figR18, under fig10d
 }

@@ -1426,9 +1426,10 @@ BUBBLE_SIZES = [(1e4, "10k"), (1e5, "100k"), (5e5, "500k"), (1e6, "1M"), (2e6, "
 
 
 def bubble_size(n):
-    """marker area (pt^2) of a bubble for n het SNPs, by the square root of n
-    so that 10k and 2M both show"""
-    return max(3.0, 160 * math.sqrt(n / 2e6))
+    """marker area (pt^2) of a bubble for n het SNPs: its diameter grows by
+    the same step for each tenfold, so 10k and 2M differ but neither dwarfs
+    the other"""
+    return max(6.0, 6 * (math.log10(max(n, 1)) - 2) ** 2)
 
 
 def bubble_figure(values, strata, ylabel, title, hline=None, from_zero=False):
