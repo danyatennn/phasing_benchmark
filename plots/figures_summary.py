@@ -1593,7 +1593,7 @@ def fig_r20(ctx):
         bar.set_label("Reads")
         bar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: short(v)))
         bar.outline.set_linewidth(0.4)
-        fig.suptitle("Read states from GRCh38 to T2T-CHM13")
+        fig.suptitle("Read states from GRCh38 to T2T-CHM13, %s" % st.PLATFORM_LABEL[platform])
         made.append(save(fig, ctx, "figR20_read_transitions_%s_%s_%dx" % (ctx.phaser, platform, ctx.depth)))
     if not made:
         raise NoData("no metrics_reads/transitions/<platform>_%dx_%s.tsv - run bin/read_transitions.sh"
