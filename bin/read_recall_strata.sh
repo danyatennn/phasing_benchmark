@@ -37,8 +37,10 @@
 #                       labelled read on chr1-22)
 # READ_RECALL_COMMON    matpat, yak: 1 (default) the same reads on both
 #                       references, see above; 0 the reads of the run's own reference
+# READ_RECALL_TIER      strata tier (1; empty = every stratum of strata.tsv)
 # A setting other than the default goes to its own files: _own for
-# READ_RECALL_COMMON=0, _min<N> for READ_RECALL_MIN_SNPS=N, after the truth's sfx.
+# READ_RECALL_COMMON=0, _min<N> for READ_RECALL_MIN_SNPS=N, _tier<N> or
+# _tierall for READ_RECALL_TIER, after the truth's sfx.
 
 set -euo pipefail
 
@@ -49,6 +51,7 @@ source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 RECALL_JOBS="${RECALL_JOBS:-4}"
 READ_RECALL_MIN_SNPS="${READ_RECALL_MIN_SNPS:-2}"
 READ_RECALL_COMMON="${READ_RECALL_COMMON:-1}"
+READ_RECALL_TIER="${READ_RECALL_TIER-1}"   # 1: tier-1 strata (default); empty: every stratum of strata.tsv
 READ_TRUTH="${READ_TRUTH:-truthtags}"
 case "${READ_TRUTH}" in
   truthtags)  REGION_REF="${REFERENCE_NAME}"; RECALL_SFX="" ;;
@@ -63,10 +66,11 @@ if [[ "${READ_TRUTH}" != truthtags && "${READ_RECALL_COMMON}" == 0 ]]; then
   RECALL_SFX="${RECALL_SFX}_own"
 fi
 [[ "${READ_RECALL_MIN_SNPS}" == 2 ]] || RECALL_SFX="${RECALL_SFX}_min${READ_RECALL_MIN_SNPS}"
+[[ "${READ_RECALL_TIER}" == 1 ]] || RECALL_SFX="${RECALL_SFX}_tier${READ_RECALL_TIER:-all}"
 mkdir -p "${METRICS_READS_DIR}" "${TMP_DIR}" "${LOGS_DIR}/reads"
 
 STRATA_ARGS=""
-for s in $(STRATA_TIER=1 strata_names); do
+for s in $(STRATA_TIER="${READ_RECALL_TIER}" strata_names); do
   STRATA_ARGS="${STRATA_ARGS} --stratum ${s}=$(REFERENCE_NAME="${REGION_REF}" stratum_bed "${s}")"
 done
 [[ -n "${STRATA_ARGS}" ]] || warn "no strata in ${STRATA_LIST}: genome-wide rows only"

@@ -170,6 +170,7 @@ class Metrics:
         self._strata = {}
         self._classes = {}
         self._mechanism = {}
+        self._matpat = None
 
     def name(self, ref, caller, platform, depth, phaser):
         return "%s_%s_%s_%sx_%s_%s_%s" % (
@@ -237,6 +238,25 @@ class Metrics:
 
     def call(self, ref, caller, platform, depth, column):
         return self.calls.get((ref, caller, platform, depth), {}).get(column, NAN)
+
+    def matpat(self, key, stratum="genome"):
+        """Reads against the Q100 parental labels, from
+        metrics_reads/summary_recall_strata_matpat.tsv (READ_TRUTH=matpat
+        bin/read_recall_strata.sh): the same reads on both references (primary
+        on both, a parental label, 2 truth het SNPs or more), placed in the
+        strata of T2T-CHM13. {truth_tagged, compared, correct}, or None.
+          recall    = correct / truth_tagged
+          precision = correct / compared (tagged in a block the truth orients)"""
+        if self._matpat is None:
+            self._matpat = {}
+            for r in _read_table(os.path.join(self.reads_dir, "summary_recall_strata_matpat.tsv")):
+                try:
+                    k = (r["reference"], r["caller"], r["platform"], int(float(r["depth"])),
+                         r["phaser"], r["stratum"])
+                    self._matpat[k] = {c: float(r[c]) for c in ("truth_tagged", "compared", "correct")}
+                except (KeyError, ValueError):
+                    continue
+        return self._matpat.get(tuple(key) + (stratum,))
 
     def get(self, key, column):
         row = self.rows.get(key)

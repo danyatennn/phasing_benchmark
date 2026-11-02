@@ -36,8 +36,9 @@ C  assemblies (dipcall_run.sh) next to the read-based phasers on the truth
    rate only: its blocks (a pair of contigs) are not phase-consistent, so its
    Hamming, NG50 and read accuracy say nothing about the assembly (D4).
      figC1_switch_<depth>x_<ref>, figC2_hamming_..., figC3_ng50_...,
-     figC4_reads_wrong_...       tagged reads on the wrong haplotype
-     figC5_reads_missed_...      truth-tagged reads not tagged to their haplotype
+     figC4_reads_wrong_matpat_...    tagged reads on the wrong parental haplotype
+     figC5_reads_missed_matpat_...   labelled reads not tagged to their parental
+                                     haplotype (Q100 labels, Metrics.matpat)
 
 HG002 files carry the reference only; another sample's carry its name too
 (figA1_switch_HG001_GRCh38).
@@ -61,8 +62,8 @@ from matplotlib.ticker import MaxNLocator
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import Metrics, _read_table, num, ratio, sample_root
-from figures import (NoData, finite, matpat_recall, n50_mb, panel_row, paper_title, positive, read_precision_pct,
-                     read_recall_pct, save, switch_pct, top_legend)
+from figures import (NoData, finite, matpat_precision_pct, matpat_recall, matpat_recall_pct, n50_mb, panel_row,
+                     paper_title, positive, save, switch_pct, top_legend)
 
 DEPTH = 30
 ASM_DEPTHS = [20, 30, 50]
@@ -84,13 +85,14 @@ def hamming_pct(db, key):
 
 
 def reads_missed_pct(db, key):
-    """truth-tagged reads the run does not tag to their haplotype: 1 - recall"""
-    return 100 - read_recall_pct(db, key)
+    """reads with a Q100 parental label the run does not tag to their
+    haplotype: 1 - recall (Metrics.matpat)"""
+    return 100 - matpat_recall_pct(db, key)
 
 
 def reads_wrong_pct(db, key):
-    """tagged reads on the wrong haplotype: 1 - precision"""
-    return 100 - read_precision_pct(db, key)
+    """tagged reads on the wrong parental haplotype: 1 - precision (Metrics.matpat)"""
+    return 100 - matpat_precision_pct(db, key)
 
 
 # (file tag, axis label, value, log axis)
@@ -98,9 +100,9 @@ METRICS = [
     ("switch", "Switch error rate (%)", switch_pct, True),
     ("hamming", "Hamming error rate (%)", hamming_pct, True),
     ("ng50", "Phase-block NG50 (Mb)", n50_mb, True),
-    ("reads_missed", "Truth-tagged reads not tagged\nto their haplotype (%)", reads_missed_pct, False),
+    ("reads_missed_matpat", "Labelled reads not tagged to\ntheir parental haplotype (%)", reads_missed_pct, False),
 ]
-READS_WRONG = ("reads_wrong", "Tagged reads on the\nwrong haplotype (%)", reads_wrong_pct, False)
+READS_WRONG = ("reads_wrong_matpat", "Tagged reads on the wrong\nparental haplotype (%)", reads_wrong_pct, False)
 
 
 B_RECALL_SFX = "_matpat_own_min0"

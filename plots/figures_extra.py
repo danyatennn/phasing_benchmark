@@ -440,8 +440,10 @@ def fig7d(db, ctx, ref):
             for caller in st.CALLERS:
                 for depth in st.DEPTHS:
                     key = (ref, caller, platform, depth, phaser)
-                    x = 100 * (1 - db.get(key, "read_precision"))
-                    y = 100 * (1 - db.get(key, "read_precision_anchor_truthtags"))
+                    # both against the Q100 parental labels: bin/readacc_truths.sh
+                    # (blocks oriented by SNPs), readacc_anchor.sh (by an anchor read)
+                    x = 100 * (1 - db.get(key, "read_precision_var_matpat"))
+                    y = 100 * (1 - db.get(key, "read_precision_anchor_matpat"))
                     if finite(x) and finite(y):
                         xs.append(max(x, 1e-3))
                         ys.append(max(y, 1e-3))
@@ -454,7 +456,8 @@ def fig7d(db, ctx, ref):
                     phasers.append(phaser)
     if not seen:
         plt.close(fig)
-        raise NoData("no anchor-oriented accuracy for %s - run readacc_anchor.sh" % ref)
+        raise NoData("no matpat accuracy for %s - run READ_TRUTHS=matpat bin/readacc_truths.sh "
+                     "and ANCHOR_TRUTH=matpat readacc_anchor.sh" % ref)
     lo, hi = min(seen) / 1.5, max(seen) * 1.5
     # x reaches further right and y further down than the runs, so the corner
     # under the diagonal is free for the platform legend
@@ -465,8 +468,8 @@ def fig7d(db, ctx, ref):
     ax.set_ylim(lo / 6, hi)
     log_ticks(ax.xaxis, lo, hi * 6)
     log_ticks(ax.yaxis, lo / 6, hi)
-    ax.set_xlabel("Reads on the wrong haplotype (%),\nblocks oriented by their SNPs")
-    ax.set_ylabel("Reads on the wrong haplotype (%),\nblocks oriented by an anchor read")
+    ax.set_xlabel("Reads on the wrong parental haplotype (%),\nblocks oriented by their SNPs")
+    ax.set_ylabel("Reads on the wrong parental haplotype (%),\nblocks oriented by an anchor read")
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
     ax.legend(handles=[Line2D([], [], color="none", marker="o", markerfacecolor=st.PLATFORM_COLOR[p],
@@ -480,7 +483,7 @@ def fig7d(db, ctx, ref):
                      loc="center", ncol=3, borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
     paper_title(fig, "Comparison of haplotagging error rates using different phase-block "
                      "orientation strategies")
-    return save(fig, ctx, "fig7d_anchor_vs_variant_orientation_" + ref)
+    return save(fig, ctx, "fig7d_anchor_vs_variant_orientation_matpat_" + ref)
 
 
 def fig7g(db, ctx, ref):
@@ -502,8 +505,9 @@ def fig7g(db, ctx, ref):
             for caller in st.CALLERS:
                 for depth in st.DEPTHS:
                     key = (ref, caller, platform, depth, phaser)
-                    snp = 1 - db.get(key, "read_recall")
-                    anchor = 1 - db.get(key, "read_recall_anchor_truthtags")
+                    # both against the Q100 parental labels, as fig7d
+                    snp = 1 - db.get(key, "read_recall_var_matpat")
+                    anchor = 1 - db.get(key, "read_recall_anchor_matpat")
                     if finite(snp) and finite(anchor) and snp > 0 and anchor > 0:
                         xs.append(100 * snp)
                         ys.append(anchor / snp)
@@ -513,7 +517,8 @@ def fig7g(db, ctx, ref):
             ys_all += ys
     if not xs_all:
         plt.close(fig)
-        raise NoData("no anchor-oriented read recall for %s - run readacc_anchor.sh" % ref)
+        raise NoData("no matpat read recall for %s - run READ_TRUTHS=matpat bin/readacc_truths.sh "
+                     "and ANCHOR_TRUTH=matpat readacc_anchor.sh" % ref)
     xlo, xhi = min(xs_all) / 1.2, max(xs_all) * 1.2
     ylo, yhi = 0.8, 2.0
     ax.set_xscale("log")
@@ -527,11 +532,11 @@ def fig7g(db, ctx, ref):
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
     paper_title(fig, "Comparison of haplotagging error rates using different phase-block "
                      "orientation strategies")
-    ax.set_xlabel("Reads not on their haplotype (%),\nSNP orientation")
+    ax.set_xlabel("Reads not on their parental\nhaplotype (%), SNP orientation")
     ax.set_ylabel("Fold increase,\nanchor read / SNP orientation")
     ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
     ax.set_axisbelow(True)
-    return save(fig, ctx, "fig7g_anchor_vs_variant_recall_ratio_" + ref)
+    return save(fig, ctx, "fig7g_anchor_vs_variant_recall_ratio_matpat_" + ref)
 
 
 TRUTH_LABEL = {"truthtags": "GIAB truth VCF (whatshap haplotag)",
@@ -732,12 +737,23 @@ def stratum_tagged(db, ref, platform, phaser, stratum, depth):
 
 
 def stratum_wrong(db, ref, platform, phaser, stratum, depth):
-    """tagged reads on the wrong haplotype, of those with a truth label"""
+    """tagged reads on the wrong haplotype, of those with a truth label (the
+    truth VCF's haplotag list; make_tables.py t12g)"""
     tagged = db.classes((ref, "truth", platform, depth, phaser)).get((stratum, "class", "tagged"))
     if not tagged or not tagged.get("compared"):
         return NAN, NAN
     n = tagged["compared"]
     return 100 * (n - tagged["correct"]) / n, n - tagged["correct"]
+
+
+def stratum_wrong_matpat(db, ref, platform, phaser, stratum, depth):
+    """tagged reads on the wrong parental haplotype, of those in a block the
+    truth orients (Metrics.matpat: the same reads and strata on both references)"""
+    m = db.matpat((ref, "truth", platform, depth, phaser), stratum)
+    if not m or not m["compared"]:
+        return NAN, NAN
+    n = m["compared"]
+    return 100 * (n - m["correct"]) / n, n - m["correct"]
 
 
 def comparable(g, g_errors, t, t_errors):
@@ -803,8 +819,8 @@ def fig12c(db, ctx):
 
 
 def fig12d(db, ctx):
-    return reference_strata(db, ctx, "fig12d_reference_strata_wrong_haplotype", stratum_wrong,
-                            "Tagged reads on the wrong haplotype")
+    return reference_strata(db, ctx, "fig12d_reference_strata_wrong_haplotype_matpat", stratum_wrong_matpat,
+                            "Tagged reads on the wrong parental haplotype")
 
 
 FIGURES_EXTRA = [

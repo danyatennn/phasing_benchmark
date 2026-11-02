@@ -251,6 +251,20 @@ def read_recall_pct(db, key):
     return 100 * db.get(key, "read_recall")
 
 
+# the read figures score reads against the Q100 parental labels (Metrics.matpat):
+# the same reads on both references, so the references compare directly
+def matpat_precision_pct(db, key, stratum="genome"):
+    """tagged reads on their parental haplotype, of those in a block the truth orients"""
+    m = db.matpat(key, stratum)
+    return 100 * m["correct"] / m["compared"] if m and m["compared"] else NAN
+
+
+def matpat_recall_pct(db, key, stratum="genome"):
+    """labelled reads tagged to their parental haplotype, of all labelled reads"""
+    m = db.matpat(key, stratum)
+    return 100 * m["correct"] / m["truth_tagged"] if m and m["truth_tagged"] else NAN
+
+
 def fnr_pct(db, key):
     if key and key[0] == "call":
         return 100 * db.call(key[1], key[2], key[3], key[4], "fnr")
@@ -308,15 +322,13 @@ def figS4(db, ctx, ref):
 
 
 def fig7b(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig7b_read_precision_" + ref, ref,
-                          read_precision_pct,
-                          "Reads on the truth haplotype,\nof reads tagged by both (%)", "platform")
+    return coverage_lines(db, ctx, "fig7b_read_precision_matpat_" + ref, ref,
+                          matpat_precision_pct, "Read haplotagging precision (%)", "platform")
 
 
 def fig7c(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig7c_read_recall_" + ref, ref,
-                          read_recall_pct,
-                          "Reads on the truth haplotype,\nof reads tagged by the truth (%)", "platform")
+    return coverage_lines(db, ctx, "fig7c_read_recall_matpat_" + ref, ref,
+                          matpat_recall_pct, "Read haplotagging recall (%)", "platform")
 
 
 # ------------------------------------------------ accuracy against contiguity: 3
@@ -695,9 +707,9 @@ def phasing_lost_pct(db, key):
 
 
 def reads_lost_pct(db, key):
-    """Reads tagged by the truth that this run left untagged or put on the
-    wrong haplotype; every run of a cell has the same reads."""
-    return 100 - read_recall_pct(db, key)
+    """Labelled reads (Q100 parental labels) that this run left untagged or
+    put on the wrong haplotype; every run of a cell has the same reads."""
+    return 100 - matpat_recall_pct(db, key)
 
 
 def fig5c(db, ctx, ref):
@@ -718,8 +730,8 @@ def figS2b(db, ctx, ref):
 
 
 def figS2c(db, ctx, ref):
-    return grid_heatmap(db, ctx, ref, "figS2c_reads_lost_all_callers", reads_lost_pct,
-                        "Truth-tagged reads not assigned\nto their haplotype (%)")
+    return grid_heatmap(db, ctx, ref, "figS2c_reads_lost_all_callers_matpat", reads_lost_pct,
+                        "Labelled reads not tagged to\ntheir parental haplotype (%)")
 
 
 def figS0(db, ctx, ref):
