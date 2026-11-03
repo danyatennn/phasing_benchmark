@@ -19,9 +19,10 @@ nothing to show raises NoData.
   fig11b  the same for phase block ends
   fig11c  why a stratum is hard: allele balance, paralog-like links, depth,
           low MAPQ, read errors (one file per platform)
-  fig12a-d T2T-CHM13 against GRCh38 on the whole genome and in each stratum:
+  fig12a-e T2T-CHM13 against GRCh38 on the whole genome and in each stratum:
           switch rate, phase block ends, reads tagged, reads on the wrong
-          haplotype (the ratio of the two)
+          haplotype, labelled reads not tagged to their haplotype (the ratio
+          of the two)
   fig9a-d the GIAB samples side by side at 30x, bars: switch rate, NG50,
           truth-tagged reads missed, FNR
 """
@@ -756,6 +757,16 @@ def stratum_wrong_matpat(db, ref, platform, phaser, stratum, depth):
     return 100 * (n - m["correct"]) / n, n - m["correct"]
 
 
+def stratum_missed_matpat(db, ref, platform, phaser, stratum, depth):
+    """labelled reads not tagged to their parental haplotype, 1 - read recall
+    (Metrics.matpat: the same reads and strata on both references)"""
+    m = db.matpat((ref, "truth", platform, depth, phaser), stratum)
+    if not m or not m["truth_tagged"]:
+        return NAN, NAN
+    n = m["truth_tagged"]
+    return 100 * (n - m["correct"]) / n, n - m["correct"]
+
+
 def comparable(g, g_errors, t, t_errors):
     """two rates are put side by side only on MIN_ERRORS errors or more on each
     reference (and a rate that is not an error count only when both are > 0)"""
@@ -823,6 +834,11 @@ def fig12d(db, ctx):
                             "Tagged reads on the wrong parental haplotype")
 
 
+def fig12e(db, ctx):
+    return reference_strata(db, ctx, "fig12e_reference_strata_missed_matpat", stratum_missed_matpat,
+                            "Labelled reads not tagged to their parental haplotype")
+
+
 FIGURES_EXTRA = [
     ("fig7d", fig7d, True),
     ("fig7e", fig7e, True),
@@ -840,4 +856,5 @@ FIGURES_EXTRA = [
     ("fig12b", fig12b, False),
     ("fig12c", fig12c, False),
     ("fig12d", fig12d, False),
+    ("fig12e", fig12e, False),
 ]
