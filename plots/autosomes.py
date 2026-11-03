@@ -100,11 +100,13 @@ def one(job):
 
     truth_total = len(TRUTH)
     correct = covered - hamming
+    # nothing compared with a phase (a sample whose truth is not phased): the
+    # phase metrics are left empty rather than written as a perfect 0
     fields = labels + [variants, phased, blocks, switches, assessed, hamming, covered,
                        truth_total, emitted, shared, correct,
-                       "%.6f" % (switches / assessed if assessed else 0),
-                       "%.6f" % (hamming / covered if covered else 0),
-                       "%.6f" % (correct / truth_total if truth_total else 0),
+                       "%.6f" % (switches / assessed) if assessed else "nan",
+                       "%.6f" % (hamming / covered) if covered else "nan",
+                       "%.6f" % (correct / truth_total) if covered and truth_total else "nan",
                        "%.6f" % (1 - shared / truth_total if truth_total else 0),
                        "%.6f" % (1 - shared / emitted if emitted else 0),
                        total, tagged, "%.6f" % (tagged / total if total else 0),

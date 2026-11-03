@@ -3,6 +3,13 @@
 # You can run it as, for example:
 #   bash bin/make_truth.sh GRCh38
 #   REFERENCE_NAME=T2T bash bin/make_truth.sh T2T
+#
+# TRUTH_PHASE=none, for a sample whose truth VCF is not phased (HG003, HG004,
+# HG006, HG007): every het biallelic SNP is kept, not only the phased ones, and
+# its phase is dropped in both files. The phaser input is built as usual;
+# nothing is scored against a phase (switch, Hamming and read accuracy come out
+# empty), while phased share, NG50, tagging and the callers' FNR/FDR stay.
+#   SAMPLE=HG003 TRUTH_PHASE=none bash bin/make_truth.sh
 
 set -euo pipefail
 
@@ -20,10 +27,18 @@ require_file "${TRUTH_SRC_VCF}" "truth VCF for ${REFERENCE_NAME}"
 
 mkdir -p "${DERIVED_DIR}"
 
-log "${REFERENCE_NAME}: heterozygous biallelic SNPs from $(basename "${TRUTH_SRC_VCF}")"
+TRUTH_PHASE="${TRUTH_PHASE:-phased}"
+case "${TRUTH_PHASE}" in
+  phased) only_phased="-p" ;;
+  none)   only_phased="" ;;
+  *) die "TRUTH_PHASE must be phased or none, not ${TRUTH_PHASE}" ;;
+esac
+
+log "${REFERENCE_NAME}: heterozygous biallelic SNPs from $(basename "${TRUTH_SRC_VCF}") (truth phase: ${TRUTH_PHASE})"
 "${BCFTOOLS}" view \
     -T "${CONFIDENT_BED}" \
-    -p -m2 -M2 -v snps -g het "${TRUTH_SRC_VCF}" \
+    ${only_phased} -m2 -M2 -v snps -g het "${TRUTH_SRC_VCF}" \
+| if [[ "${TRUTH_PHASE}" == none ]]; then "${BCFTOOLS}" +setGT - -- -t a -n u; else cat; fi \
 | "${BCFTOOLS}" annotate -x 'INFO,^FORMAT/GT' -Oz -o "${TRUTH_PHASED}"
 "${TABIX}" -f -p vcf "${TRUTH_PHASED}"
 
@@ -58,8 +73,12 @@ leaked="$("${BCFTOOLS}" query -f '[%GT]\n' "${TRUTH_UNPHASED}" \
 
 kept="$("${BCFTOOLS}" query -f '[%GT]\n' "${TRUTH_PHASED}" \
   | awk '/\|/ { n++ } END { print n + 0 }')"
-[[ "${kept}" -eq "${n_phased}" ]] \
-  || die "evaluation reference is not fully phased: ${kept}/${n_phased}"
+if [[ "${TRUTH_PHASE}" == none ]]; then
+  [[ "${kept}" -eq 0 ]] || die "TRUTH_PHASE=none, yet ${kept} truth genotypes still contain '|'"
+else
+  [[ "${kept}" -eq "${n_phased}" ]] \
+    || die "evaluation reference is not fully phased: ${kept}/${n_phased}"
+fi
 
 log "${REFERENCE_NAME} truth ready: ${n_phased} heterozygous biallelic SNPs"
 log "  phased:   ${TRUTH_PHASED}"

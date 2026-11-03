@@ -49,7 +49,8 @@ import matplotlib.colors as matplotlib_colors
 
 import style as st
 from data import sample_root
-from figures import NoData, colorbar, heatmap, log_ticks, save, series_handle, stratum_label, top_legend, y_grid
+from figures import (NoData, SameDecimals, colorbar, heatmap, log_ticks, same_decimals, save, series_handle,
+                     sig_number, stratum_label, top_legend, y_grid)
 
 
 # ------------------------------------------------------------------ helpers
@@ -569,7 +570,7 @@ def fig_r9(ctx):
         bar_ax.tick_params(labelbottom=False, bottom=False)
         bar_ax.spines["bottom"].set_visible(False)
         y_grid(bar_ax)
-        bar_ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: short(v) if v else "0"))
+        bar_ax.yaxis.set_major_formatter(SameDecimals(units=True))
         # brackets over the groups
         i0 = 0
         for (flag, title), g in zip(groups, shown):
@@ -610,7 +611,7 @@ def fig_r9(ctx):
         set_ax.set_yticks([])
         set_ax.spines["left"].set_visible(False)
         set_ax.spines["right"].set_visible(True)
-        set_ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: short(v) if v else "0"))
+        set_ax.xaxis.set_major_formatter(SameDecimals(units=True))
         set_ax.tick_params(axis="x", labelsize=st.FONT_SIZE - 1)
         for lab in set_ax.get_xticklabels():
             lab.set_rotation(40)
@@ -934,7 +935,7 @@ def tick_label(v):
         return "%.0f" % v
     if v >= 10:
         return "%.1f" % v
-    return "%.2g" % v
+    return sig_number(v)
 
 
 # -------------------------------------- R14: callers' input, by region
@@ -1116,7 +1117,7 @@ def fig_r16(ctx):
             lo, hi = image["norm"].vmin, image["norm"].vmax
             ticks = [t for t in (0.1, 0.2, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3, 5, 10) if lo <= t <= hi]
             bar.set_ticks(ticks)
-            bar.set_ticklabels(["%g" % t for t in ticks])
+            bar.set_ticklabels(same_decimals(ticks))
         fig.suptitle(title)
         return save(fig, ctx, name)
 
@@ -1444,22 +1445,22 @@ def bubble_size(n):
 
 
 def bubble_figure(values, strata, ylabel, title, hline=None, from_zero=False):
-    """values: (platform, stratum) -> (y, het SNPs); a column per region, a
-    bubble per platform side by side, its area by the number of het SNPs;
-    under the plot a row of platforms and a row of sizes."""
+    """values: (platform, stratum) -> (y, het SNPs); a column per region, the
+    bubbles of its platforms one over the other at its x, each bubble's area
+    by the number of het SNPs, a smaller bubble drawn over a larger one; under
+    the plot a row of platforms and a row of sizes."""
     platforms = [p for p in st.PLATFORMS if any(k[0] == p for k in values)]
     w, h = st.PAPER_PANELS["bubbles"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
     grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.25])
     ax, legend_ax = fig.add_subplot(grid[0]), fig.add_subplot(grid[1])
-    step = 0.18
     for si, (s_, _) in enumerate(strata):
-        for j, p in enumerate(platforms):
+        for p in platforms:
             y, n = values.get((p, s_), (math.nan, 0))
             if y == y:
-                ax.scatter(si + (j - (len(platforms) - 1) / 2) * step, y, s=bubble_size(n),
-                           color=st.PLATFORM_COLOR[p], alpha=0.9, edgecolor="white", linewidth=0.4,
-                           zorder=3)
+                size = bubble_size(n)
+                ax.scatter(si, y, s=size, color=st.PLATFORM_COLOR[p], alpha=0.9, edgecolor="white",
+                           linewidth=0.4, zorder=3 + 1 / size)
     if hline is not None:
         ax.axhline(hline, color=st.MUTED, linestyle="--", linewidth=0.6, zorder=1)
     ax.set_xticks(range(len(strata)))
@@ -1581,7 +1582,7 @@ def fig_r20(ctx):
                 elif pct < 0.01:
                     text = "<0.01"
                 else:
-                    text = "%.2g" % pct if pct < 10 else "%.0f" % pct
+                    text = sig_number(pct) if pct < 10 else "%.0f" % pct
                 dark = m[i, j] > 0 and norm(m[i, j]) > 0.6
                 ax.text(j, i, text, ha="center", va="center", fontsize=st.CELL_FONT,
                         color="white" if dark else st.INK)
@@ -1646,7 +1647,7 @@ def fig_r21(ctx):
     ax.tick_params(axis="x", length=0)
     ax.set_xlim(-0.6, len(platforms) - 0.4)
     ax.set_ylim(0, max(v for v, _ in data.values()) * 1.15)
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: "%gk" % (v / 1000) if v else "0"))
+    ax.yaxis.set_major_formatter(SameDecimals(units=True))
     ax.set_ylabel("Reads")
     y_grid(ax)
     handles = [Patch(color=st.MUTED, alpha=PALE_BAR, label="Rescued on T2T-CHM13"),

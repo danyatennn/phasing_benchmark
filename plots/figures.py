@@ -30,7 +30,8 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, LogNorm
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
-from matplotlib.ticker import FixedLocator, FuncFormatter, LogLocator, MaxNLocator, NullLocator
+from matplotlib.ticker import (FixedLocator, Formatter, FuncFormatter, LogLocator, MaxNLocator,
+                               NullLocator)
 
 import style as st
 from data import NAN, ratio
@@ -113,6 +114,55 @@ def tick_number(v):
     if v >= 1e4:
         return "%gk" % (v / 1e3)
     return "%g" % v
+
+
+def sig_number(v, digits=2):
+    """A value to `digits` significant figures, its significant zeros kept:
+    0.030, 0.10, 1.0, 45 - never 0.03 for a value read to two figures."""
+    if not finite(v) or v == 0:
+        return "0"
+    v = float("%.*g" % (digits, v))
+    decimals = max(0, digits - 1 - int(math.floor(math.log10(abs(v)))))
+    return "%.*f" % (decimals, v)
+
+
+def decimals_of(v):
+    """decimals a tick value needs, at most four: 0.95 -> 2, 1 -> 0"""
+    s = ("%.4f" % v).rstrip("0")
+    return len(s) - s.index(".") - 1
+
+
+def same_decimals(values, scale=1.0, suffix=""):
+    """Tick labels with one number of decimals for all: 0.90, 0.95, 1.00 rather
+    than 0.9, 0.95, 1. With a suffix (k, M) the values are divided by scale."""
+    scaled = [v / scale for v in values]
+    d = max((decimals_of(v) for v in scaled), default=0)
+    return ["0" if suffix and v == 0 else "%.*f%s" % (d, v, suffix) for v in scaled]
+
+
+class SameDecimals(Formatter):
+    """same_decimals as the formatter of a linear axis. units=True writes
+    thousands and millions as k and M (from 10k up)."""
+
+    def __init__(self, units=False):
+        self.units = units
+        self.scale, self.suffix, self.decimals = 1.0, "", 0
+
+    def set_locs(self, locs):
+        super().set_locs(locs)
+        top = max((abs(v) for v in locs), default=0)
+        if self.units and top >= 1e6:
+            self.scale, self.suffix = 1e6, "M"
+        elif self.units and top >= 1e4:
+            self.scale, self.suffix = 1e3, "k"
+        else:
+            self.scale, self.suffix = 1.0, ""
+        self.decimals = max((decimals_of(v / self.scale) for v in locs), default=0)
+
+    def __call__(self, v, pos=None):
+        if self.suffix and v == 0:
+            return "0"
+        return "%.*f%s" % (self.decimals, v / self.scale, self.suffix)
 
 
 def y_grid(ax):
@@ -341,46 +391,47 @@ def better_top_right(axes):
 
 # fig3: the phase block NG50 of PacBio stays under this (Mb); its panels get an
 # x axis of their own up to it, not the ONT one up to 2 Mb
-FIG3_PACBIO_MAX = 0.5
+FIG3_PACBIO_MAX = 0.7
 
 
 def fig3(db, ctx, caller="truth"):
     """Fig. 2a: a row per reference (T2T-CHM13 over GRCh38), a panel per
-    platform. One shape: the colour is the phaser, the size of the ball the
-    coverage, small at 10x to big at 50x. x and y are shared within a
+    platform, the panels touching. One shape: the colour is the phaser, the
+    size of the ball the coverage, small at 10x to big at 50x. y is shared by
+    every panel, so its ticks are written once per row; x is shared within a
     technology, across both rows, so the references compare by eye."""
     sizes = [5 + 7 * i for i in range(len(st.DEPTHS))]
     refs = list(reversed(st.REFERENCES))
     fig = plt.figure(figsize=panel_size("fig3"), constrained_layout=True)
-    # a narrow first column for the reference of each row; under the panels
-    # one x label for all, then the legend
-    grid = fig.add_gridspec(len(refs) + 2, len(st.PLATFORMS) + 1,
-                            width_ratios=[0.07] + [1] * len(st.PLATFORMS),
-                            height_ratios=[1] * len(refs) + [0.05, 0.16])
-    xlabel_ax = fig.add_subplot(grid[len(refs), 1:])
+    # no space between the panels of a row
+    fig.get_layout_engine().set(w_pad=0, wspace=0)
+    # the panels in a grid of their own, the x label and the legend under it:
+    # an axes spanning the panel columns would make constrained_layout give
+    # every gap between them the margin of the y label
+    outer = fig.add_gridspec(3, 1, height_ratios=[len(refs), 0.05, 0.16])
+    grid = outer[0].subgridspec(len(refs), len(st.PLATFORMS))
+    xlabel_ax = fig.add_subplot(outer[1])
     xlabel_ax.axis("off")
     xlabel_ax.text(0.5, 0.5, "Phase-block NG50 (Mb)", ha="center", va="center",
                    transform=xlabel_ax.transAxes)
-    legend_ax = fig.add_subplot(grid[len(refs) + 1, :])
+    legend_ax = fig.add_subplot(outer[2])
     legend_ax.axis("off")
     tech = {pl: t for t, pls in TECHNOLOGIES for pl in pls}
-    first_of, xs_by, ys_by, panels = {}, {}, {}, []
+    first_of, xs_by, ys_all, panels = {}, {}, [], []
+    first_y = None
     for r, ref in enumerate(refs):
-        label_ax = fig.add_subplot(grid[r, 0])
-        label_ax.axis("off")
-        label_ax.text(0.5, 0.5, st.REFERENCE_LABEL[ref], rotation=90, ha="center", va="center",
-                      transform=label_ax.transAxes)
-        row_first = set()
         for i, platform in enumerate(st.PLATFORMS):
             t = tech.get(platform, platform)
-            ax = fig.add_subplot(grid[r, i + 1], sharex=first_of.get(t), sharey=first_of.get(t))
+            ax = fig.add_subplot(grid[r, i], sharex=first_of.get(t), sharey=first_y)
             first_of.setdefault(t, ax)
-            # the y ticks once per technology in a row, the y label once per row
-            if t in row_first:
-                ax.tick_params(labelleft=False)
+            first_y = first_y or ax
+            # the y ticks and label once per row, on its first panel, the
+            # reference over the label; the others keep the grid but no tick
+            # marks poking into their neighbour
             if i == 0:
-                ax.set_ylabel("Switch error rate (%)")
-            row_first.add(t)
+                ax.set_ylabel("%s\nSwitch error rate (%%)" % st.REFERENCE_LABEL[ref])
+            else:
+                ax.tick_params(axis="y", which="both", left=False, labelleft=False)
             if r == 0:
                 ax.set_title(st.PLATFORM_LABEL[platform])
             if r < len(refs) - 1:
@@ -401,7 +452,7 @@ def fig3(db, ctx, caller="truth"):
                 ax.scatter(xs, ys, s=ss, color=st.PHASER_COLOR[phaser],
                            marker="o", edgecolor="white", linewidth=0.5, zorder=3)
                 xs_by.setdefault(t, []).extend(xs)
-                ys_by.setdefault(t, []).extend(ys)
+                ys_all.extend(ys)
                 lines += 1
             if not lines:
                 empty_panel(ax)
@@ -411,25 +462,27 @@ def fig3(db, ctx, caller="truth"):
         raise NoData("no %s rows" % caller)
 
     for t, ax in first_of.items():
-        xs, ys = xs_by.get(t), ys_by.get(t)
+        xs = xs_by.get(t)
         if not xs:
             continue
         ax.set_xscale("log")
-        xlo, xhi = min(xs) / 1.25, max(xs) * 1.25
+        # wider than the data, so the outer ticks stay off the edge where the
+        # next panel begins and their labels do not run into its own
+        xlo, xhi = min(xs) / 1.5, max(xs) * 1.5
         if t == "PacBio":
             xhi = FIG3_PACBIO_MAX
         ax.set_xlim(xlo, xhi)
         log_ticks(ax.xaxis, xlo, xhi)
-        # a panel is narrow: over a decade and more, 0.2 would touch 0.1
-        ticks = [v for v in (0.05, 0.1, 0.2, 0.5, 1, 2, 5) if xlo <= v <= xhi]
-        if xhi / xlo > 10 and 0.1 in ticks:
-            ticks.remove(0.2)
+        # no tick near an edge, where the label of the next panel begins
+        span = math.log(xhi / xlo)
+        ticks = [v for v in (0.05, 0.1, 0.2, 0.5, 1, 2, 5)
+                 if 0.07 <= math.log(v / xlo) / span <= 0.93]
         ax.xaxis.set_major_locator(FixedLocator(ticks))
-        ax.set_yscale("log")
-        lo, hi = min(ys) / 1.25, max(ys) * 1.25
-        # fewer errors go up, so the best run sits in the top right corner
-        ax.set_ylim(hi, lo)
-        log_ticks(ax.yaxis, lo, hi)
+    first_y.set_yscale("log")
+    lo, hi = min(ys_all) / 1.25, max(ys_all) * 1.25
+    # fewer errors go up, so the best run sits in the top right corner
+    first_y.set_ylim(hi, lo)
+    log_ticks(first_y.yaxis, lo, hi)
 
     phasers = [series_handle(st.PHASER_COLOR[p], "o", st.PHASER_LABEL[p]) for p in st.PHASERS]
     coverage = [Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
@@ -639,7 +692,8 @@ def colorbar(fig, im, ax, label, unit=None):
     bar.outline.set_visible(False)
     if isinstance(im.norm, LogNorm):
         bar.ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
-    bar.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    bar.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v) if isinstance(im.norm, LogNorm)
+                                     else SameDecimals())
     bar.ax.yaxis.set_minor_locator(NullLocator())
     bar.ax.tick_params(length=2)
     return bar
@@ -670,8 +724,8 @@ def fig5b(db, ctx, ref):
 
 def short_number(v):
     """Two significant figures, so a value fits its cell and a small one is
-    not printed as 0.00."""
-    return "%.0f" % v if v >= 10 else "%.2g" % v
+    not printed as 0.00; its significant zeros kept (0.030)."""
+    return "%.0f" % v if v >= 10 else sig_number(v)
 
 
 def grid_heatmap(db, ctx, ref, name, value, bar_label, title=None, unit=None):
@@ -1353,7 +1407,7 @@ def ratio_axis(ax, ratios, label, limits=None):
         ax.set_ylim(lo, hi)
         ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
         ax.yaxis.set_major_locator(MaxNLocator(6, steps=[1, 2, 2.5, 5, 10]))
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % round(v, 4)))
+        ax.yaxis.set_major_formatter(SameDecimals())
         ax.yaxis.set_minor_locator(NullLocator())
         ax.set_ylabel("%s,\n%s / %s" % (label.replace(" (%)", "").replace(" (Mb)", ""),
                                         st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
@@ -1369,7 +1423,7 @@ def ratio_axis(ax, ratios, label, limits=None):
             ax.axhspan(1 / BAND, BAND, color=st.GRID, linewidth=0, zorder=0)
         ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=1)
         ax.set_yticks([lo + i * (hi - lo) / 4 for i in range(5)])
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+        ax.yaxis.set_major_formatter(SameDecimals())
         ax.yaxis.set_minor_locator(NullLocator())
         # a ratio has no unit: "Switch error rate (%)" becomes "Switch error rate"
         ax.set_ylabel("%s,\n%s / %s" % (label.replace(" (%)", "").replace(" (Mb)", ""),
@@ -1389,7 +1443,7 @@ def ratio_axis(ax, ratios, label, limits=None):
         while len(ticks) > 7:
             ticks = ticks[::2] if 1 in ticks[::2] else ticks[1::2]
     ax.set_yticks(ticks)
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    ax.yaxis.set_major_formatter(SameDecimals())
     ax.yaxis.set_minor_locator(NullLocator())
     ax.set_ylabel("%s,\n%s / %s" % (label, st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
 

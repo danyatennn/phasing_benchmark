@@ -10,7 +10,7 @@ goes on a log axis, its bars starting at the bottom of the axis.
 """
 
 import style as st
-from figures import finite, log_ticks
+from figures import finite, log_ticks, sig_number
 
 
 def offsets(n, width=0.8):
@@ -29,7 +29,8 @@ def bar(ax, x, value, width, color, alpha=1.0, hatch=None):
 
 
 def value_text(v):
-    """2-3 significant digits, never a power of ten: 0.042, 0.23, 1.13, 7.6, 145"""
+    """2-3 significant digits, never a power of ten, significant zeros kept:
+    0.042, 0.030, 0.23, 1.13, 7.6, 145"""
     a = abs(v)
     if a >= 100:
         return "%.0f" % v
@@ -37,7 +38,7 @@ def value_text(v):
         return "%.1f" % v
     if a >= 0.1:
         return "%.2f" % v
-    return "%.2g" % v
+    return sig_number(v)
 
 
 def change_text(new, old):

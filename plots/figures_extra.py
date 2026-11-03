@@ -34,13 +34,13 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+from matplotlib.ticker import FixedLocator, NullLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes
 from data import NAN, ratio
-from figures import (NoData, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks, panel_row,
-                     panel_size, paper_title,
+from figures import (NoData, SameDecimals, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks,
+                     panel_row, panel_size, paper_title,
                      platform_groups, platform_phaser_rows,
                      phaser_axis, phaser_handles, platform_handles, positive, save,
                      short_number, strata_heatmap, stratum_label, top_legend, y_grid)
@@ -191,7 +191,7 @@ def grouped_bars(ax, groups, shares, width=0.2):
     ax.set_xticklabels([CLASS_TICK[g] for g in groups])
     ax.set_xlim(-0.55, len(groups) - 0.45)
     ax.tick_params(axis="x", length=0)
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    ax.yaxis.set_major_formatter(SameDecimals())
     y_grid(ax)
 
 
@@ -527,7 +527,7 @@ def fig7g(db, ctx, ref):
     ax.set_ylim(ylo, yhi)
     log_ticks(ax.xaxis, xlo, xhi)
     ax.yaxis.set_major_locator(FixedLocator([0.8, 1, 1.25, 1.5, 2]))
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    ax.yaxis.set_major_formatter(SameDecimals())
     ax.yaxis.set_minor_locator(NullLocator())
     ax.axhline(1, color=st.MUTED, linewidth=0.6, linestyle=(0, (4, 3)), zorder=2)
     paper_title(fig, "Comparison of haplotagging error rates using different phase-block "

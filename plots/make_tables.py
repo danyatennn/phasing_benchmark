@@ -26,7 +26,8 @@ are still written.
   t09_call_vs_phase    what calling and what phasing cost, on the truth denominator
   t10_error_types      switch against flip errors
   t11_reads_30x        read-level metrics at 30x, every input
-  t11b_read_truths     read accuracy against the three read truths (truthtags, matpat, yak)
+  t11b_read_truths     read accuracy against the three read truths (truthtags, matpat, yak),
+                       blocks oriented by their SNPs (and by an anchor read, for comparison)
   t12a_strata          what the strata are
   t12b_strata_switch   switch rate per stratum at 30x
   t12c_strata_inputs   phasing per stratum at 30x, every input
@@ -721,13 +722,20 @@ def t11_reads(db, depth):
 def t11b_read_truths(db, depth):
     from data import ANCHOR_TRUTHS
     t = Table("t11b_read_truths", "Read accuracy against three read truths, %dx" % depth,
-              "Precision and recall of the read tags, blocks oriented by an anchor read "
-              "(readacc_anchor.sh), against each truth of which haplotype a read comes from: "
-              "truthtags = whatshap haplotag on the phased truth VCF; matpat = the read aligned "
-              "to both parental copies of the HG002 Q100 assembly (bin/matpat_truth.sh); yak = "
-              "parental k-mers (bin/yak_truth.sh). Empty: that truth not computed for the run.",
+              "Precision and recall of the read tags against each truth of which haplotype a "
+              "read comes from: truthtags = whatshap haplotag on the phased truth VCF; matpat = "
+              "the read aligned to both parental copies of the HG002 Q100 assembly "
+              "(bin/matpat_truth.sh); yak = parental k-mers (bin/yak_truth.sh). Every block is "
+              "oriented by its SNPs, as in readacc_run.sh, the same for all truths "
+              "(bin/readacc_truths.sh). *_common: over the reads labelled by both that truth and "
+              "the truth VCF - the columns to compare truths by. *_anchor: blocks oriented by "
+              "their longest labelled read (readacc_anchor.sh) instead, kept for comparison; the "
+              "parental truths err most on the longest reads, so the anchor inflates their errors. "
+              "Empty: not computed for the run.",
               ["reference", "platform", "input", "phaser"]
-              + ["%s_%s_pct" % (m, truth) for truth in ANCHOR_TRUTHS for m in ("precision", "recall")])
+              + ["%s_%s_pct" % (m, truth) for truth in ANCHOR_TRUTHS
+                 for m in ("precision", "recall", "precision_common", "recall_common",
+                           "precision_anchor", "recall_anchor")])
     for ref in st.REFERENCES:
         for p in st.PLATFORMS:
             for c in st.CALLERS:
@@ -737,9 +745,13 @@ def t11b_read_truths(db, depth):
                         continue
                     cells = []
                     for truth in ANCHOR_TRUTHS:
-                        cells += [100 * db.get(k, "read_precision_anchor_%s" % truth),
+                        cells += [100 * db.get(k, "read_precision_var_%s" % truth),
+                                  100 * db.get(k, "read_recall_var_%s" % truth),
+                                  100 * db.get(k, "read_precision_common_var_%s" % truth),
+                                  100 * db.get(k, "read_recall_common_var_%s" % truth),
+                                  100 * db.get(k, "read_precision_anchor_%s" % truth),
                                   100 * db.get(k, "read_recall_anchor_%s" % truth)]
-                    if any(finite(v) for v in cells[2:]):      # at least one parental truth
+                    if any(finite(v) for v in cells[6:]):      # at least one parental truth
                         t.add(ref_label(ref), plat(p), caller_label(c), phaser_label(ph), *cells)
     return t
 

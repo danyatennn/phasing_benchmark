@@ -8,8 +8,11 @@
                               From metrics_strata_auto/vaf_<ref>.tsv
                               (bin/vaf_strata.sh).
   figR2_tagged_strata_<ref>   reads tagged per region: a panel per region, a
-                              horizontal bar per platform (the mean over the phasers run
-                              on every platform), a point per phaser. A read is
+                              horizontal bar per platform, the mean over the phasers run
+                              on every platform. On the truth input every phaser
+                              gets the same sites and tags nearly the same reads,
+                              so the phasers are not shown apart; their spread is
+                              printed. A read is
                               tagged if whatshap haplotag put it on H1/H2 in a
                               block of two or more SNPs, and is in a region if
                               half its alignment or more lies there. Reads
@@ -40,7 +43,7 @@ from matplotlib.patches import Patch
 
 import style as st
 from data import Metrics, sample_root
-from figures import NoData, finite, paper_title, save, series_handle, stratum_label
+from figures import NoData, finite, paper_title, save, stratum_label
 
 # one line a bar: two lines of FONT_SIZE are taller than a bar of Fig. 1c; the
 # legend under the panels names the platform in full
@@ -136,7 +139,7 @@ def fig_vaf(ctx, db, ref):
             ax.axvline(0.5, color=st.MUTED, linewidth=0.5, linestyle="--", zorder=1)
             ax.set_xlim(0, 1)
             ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-            ax.set_xticklabels(["0", "", "0.5", "", "1"])
+            ax.set_xticklabels(["0.0", "", "0.5", "", "1.0"])
             if i == 0:
                 ax.set_title(st.PLATFORM_LABEL[platform])
             if j == 0:
@@ -197,19 +200,25 @@ def fig_tagged(ctx, db, ref):
     phasers = [p for p in ctx.phasers if p in values]
     # the bar is over the phasers run on every platform, so the platforms share it
     common = [p for p in phasers if all(st.applies(pl, p) for pl in platforms)]
+    for platform in platforms:
+        spread = [max(v) - min(v) for v in
+                  ([values[p][platform][r] for p in common if r in values[p].get(platform, {})]
+                   for r in regions) if v]
+        if spread:
+            print("  %s %s: phasers differ by at most %.2f%% tagged in a region"
+                  % (ref, platform, max(spread)), file=sys.stderr)
 
     # Fig. 1c: horizontal bars, a row per platform, the share tagged along x;
-    # two panels to a row, the legend under the panels
+    # two panels to a row, the platform legend under the panels
     ncols = min(2, len(regions))
     nrows = math.ceil(len(regions) / ncols)
     w, h = st.PAPER_PANELS["regions"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(nrows + 1, ncols, height_ratios=[1] * nrows + [0.95])
+    grid = fig.add_gridspec(nrows + 1, ncols, height_ratios=[1] * nrows + [0.45])
     legend_ax = fig.add_subplot(grid[nrows, :])
     legend_ax.axis("off")
 
     y = np.arange(len(platforms))
-    offsets = np.linspace(-0.27, 0.27, len(phasers)) if len(phasers) > 1 else [0.0]
     first = None
     for n, region in enumerate(regions):
         ax = fig.add_subplot(grid[n // ncols, n % ncols], sharex=first)
@@ -219,12 +228,7 @@ def fig_tagged(ctx, db, ref):
             bar = [values[p][platform][region] for p in common
                    if region in values[p].get(platform, {})]
             if bar:
-                ax.barh(i, np.mean(bar), height=0.75, color=color, alpha=0.3, linewidth=0, zorder=2)
-            for off, phaser in zip(offsets, phasers):
-                v = values[phaser].get(platform, {}).get(region)
-                if v is not None:
-                    ax.plot(v, i + off, marker=st.PHASER_MARKER[phaser], color=color,
-                            markeredgecolor="white", linestyle="none", zorder=3)
+                ax.barh(i, np.mean(bar), height=0.75, color=color, linewidth=0, zorder=2)
         title = "Confident regions (chr1-22)" if region == "genome" else stratum_label(region)
         # a panel is narrow: a long name goes on two lines
         ax.set_title(textwrap.fill(title.replace("\n", " "), 22))
@@ -242,15 +246,9 @@ def fig_tagged(ctx, db, ref):
         if n // ncols == nrows - 1 or n + ncols >= len(regions):
             ax.set_xlabel("Haplotagged %s (%%)" % ("reads" if ctx.unit == "reads" else "read bases"))
 
-    # platforms two to a row over the phasers three to a row
-    first = legend_ax.legend(handles=[Patch(color=st.PLATFORM_COLOR[p], alpha=0.3, label=st.PLATFORM_LABEL[p])
-                                      for p in platforms],
-                             loc="upper center", ncol=2, borderaxespad=0, columnspacing=1.0)
-    legend_ax.add_artist(first)
-    legend_ax.legend(handles=[series_handle(st.INK, st.PHASER_MARKER[p], st.PHASER_LABEL[p], line=False)
-                              for p in phasers],
-                     loc="lower center", ncol=3, borderaxespad=0,
-                     handletextpad=0.2, columnspacing=0.8)
+    legend_ax.legend(handles=[Patch(color=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p])
+                              for p in platforms],
+                     loc="center", ncol=2, borderaxespad=0, columnspacing=1.0)
     paper_title(fig, "Comparison of haplotagged %s across different genomic regions on %s"
                 % ("reads" if ctx.unit == "reads" else "read bases", st.REFERENCE_LABEL[ref]))
     suffix = "" if ctx.unit == "reads" else "_bases"

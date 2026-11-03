@@ -19,9 +19,8 @@ A  extra variants in the phaser input (bin/make_truth_variants.sh), 30x: the
      figA5_indels_phased_<ref>   input indels the phaser phased (bin/variants_eval.sh)
      figA6_indels_wrong_<ref>    oriented indels on the wrong haplotype
      figA7_reads_<ref>           reads tagged against the SNP input: gained, lost
-B  methylation (meth_run.sh), truth input, 30x: each phaser alone (pale), with
-   MethPhaser on top of its VCF (solid), and LongPhase with its own 5mC mode
-   (hatched)
+B  methylation (meth_run.sh), truth input, 30x: each phaser alone (pale) and
+   with MethPhaser on top of its VCF (solid)
      figB1_switch_<ref>, figB2_hamming_<ref>, figB3_ng50_<ref>,
      figB4_read_recall_matpat_<ref>   read haplotagging recall: of the chr1-22
                                       reads the matpat truth labels (alignment to
@@ -30,6 +29,10 @@ B  methylation (meth_run.sh), truth input, 30x: each phaser alone (pale), with
                                       own reference, no truth SNP minimum
                                       (READ_RECALL_COMMON=0 READ_RECALL_MIN_SNPS=0
                                       READ_TRUTH=matpat bin/read_recall_strata.sh)
+     figB5_longphase_methylation_<ref>   LongPhase alone, with MethPhaser and
+                                      with its own 5mC mode (longphase modcall),
+                                      a panel per metric of B1-B4, a group per
+                                      platform
 C  assemblies (dipcall_run.sh) next to the read-based phasers on the truth
    input, one coverage (--asm-depth, 30x). An assembly brings its own SNPs
    (dipcall, inside dip.bed). hifiasm without parents is shown for the switch
@@ -62,8 +65,8 @@ from matplotlib.ticker import MaxNLocator
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import Metrics, _read_table, num, ratio, sample_root
-from figures import (NoData, finite, matpat_precision_pct, matpat_recall, matpat_recall_pct, n50_mb, panel_row,
-                     paper_title, positive, save, switch_pct, top_legend)
+from figures import (NoData, empty_panel, finite, matpat_precision_pct, matpat_recall, matpat_recall_pct,
+                     n50_mb, panel_row, paper_title, positive, save, switch_pct, top_legend)
 
 DEPTH = 30
 ASM_DEPTHS = [20, 30, 50]
@@ -168,7 +171,22 @@ PAPER = {
     "figB1": ("experiment", False, "Effect of DNA methylation integration on switch error rate"),
     "figB3": ("experiment", False, "Effect of DNA methylation integration on phase-block NG50"),
     "figB4": ("experiment_legend", True, "Effect of DNA methylation integration on read haplotagging recall"),
+    "figB5": ("experiment_legend", True, "MethPhaser and LongPhase 5mC mode (modcall) on LongPhase"),
 }
+
+
+def zoom_recall(ax, drawn):
+    """A recall axis zoomed on the bars so the differences show: from under the
+    lowest to over the highest, with room for the turned bar labels; no tick
+    over 100%."""
+    values = [v for v in drawn if finite(v)]
+    lo, hi = min(values), max(values)
+    span = max(hi - lo, 1.0)
+    bottom = max(0.0, lo - 0.15 * span)
+    top = hi + 0.35 * span
+    ax.set_ylim(bottom, top)
+    ticks = MaxNLocator(5).tick_values(bottom, min(top, 100))
+    ax.set_yticks([t for t in ticks if bottom <= t <= 100])
 
 
 def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper=None):
@@ -200,17 +218,7 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper
         raise NoData("no %s values" % tag)
     scale_axes(axes, drawn, log, ylabel)
     if tag.startswith("read_recall"):
-        # zoomed on the bars so the differences show: from under the lowest
-        # to over the highest, with room for the turned bar labels; no tick
-        # over 100%
-        values = [v for v in drawn if finite(v)]
-        lo, hi = min(values), max(values)
-        span = max(hi - lo, 1.0)
-        bottom = max(0.0, lo - 0.15 * span)
-        top = hi + 0.35 * span
-        axes[0].set_ylim(bottom, top)
-        ticks = MaxNLocator(5).tick_values(bottom, min(top, 100))
-        axes[0].set_yticks([t for t in ticks if bottom <= t <= 100])
+        zoom_recall(axes[0], drawn)
     top_legend(legend_ax, legend_patches(legend))
     paper_title(fig, title)
     return save(fig, ctx, name)
@@ -315,16 +323,63 @@ def figB_metric(db, ctx, sample, ref, number, metric):
         raise NoData("no methylation runs of %s on %s" % (sample, ref))
 
     def bars_of(platform, phaser):
-        out = [((ref, "truth", platform, DEPTH, phaser), PALE, None),
-               ((ref, "truth", platform, DEPTH, "mp" + phaser), 1.0, None)]
-        if phaser == "longphase":
-            out.append(((ref, "truth", platform, DEPTH, "lpmod"), 1.0, "////"))
-        return out
+        return [((ref, "truth", platform, DEPTH, phaser), PALE, None),
+                ((ref, "truth", platform, DEPTH, "mp" + phaser), 1.0, None)]
 
-    legend = [("Phasing method alone", PALE, None), ("+ MethPhaser", 1.0, None),
-              ("LongPhase + 5mC (modcall)", 1.0, "////")]
+    legend = [("Phasing method alone", PALE, None), ("+ MethPhaser", 1.0, None)]
     return compare_groups(db, ctx, fig_name("figB%d_%s" % (number, metric[0]), sample, ref), ref,
                           metric, platforms, bars_of, legend, PAPER.get("figB%d" % number))
+
+
+LONGPHASE_METH = [("longphase", PALE, None, "LongPhase alone"),
+                  ("mplongphase", 1.0, None, "LongPhase + MethPhaser"),
+                  ("lpmod", 1.0, "////", "LongPhase + 5mC (modcall)")]
+
+
+def figB5(db, ctx, sample, ref):
+    """The two ways of adding 5mC to LongPhase side by side: a panel per metric
+    of B1-B4, a group per platform, LongPhase alone (pale), with MethPhaser on
+    top of its VCF (solid) and in its own 5mC mode (hatched)."""
+    key = lambda p, ph: (ref, "truth", p, DEPTH, ph)
+    platforms = [p for p in st.PLATFORMS
+                 if any(db.has(key(p, ph)) for ph in ("mplongphase", "lpmod"))]
+    if not platforms:
+        raise NoData("no LongPhase methylation runs of %s on %s" % (sample, ref))
+    size, _, title = PAPER["figB5"]
+    w, h = st.PAPER_PANELS[size]
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, len(METRICS_B), height_ratios=[1, 0.1])
+    xs, bw = offsets(len(LONGPHASE_METH))
+    color = st.PHASER_COLOR["longphase"]
+    drawn_any = False
+    for i, (tag, ylabel, value, log) in enumerate(METRICS_B):
+        ax = fig.add_subplot(grid[0, i])
+        drawn = []
+        for x, platform in enumerate(platforms):
+            for dx, (phaser, alpha, hatch, _) in zip(xs, LONGPHASE_METH):
+                v = value(db, key(platform, phaser))
+                v = positive(v) if log else v
+                if bar(ax, x + dx, v, bw, color, alpha, hatch) is None:
+                    continue
+                drawn.append(v)
+                label_bar(ax, x + dx, v, bw, value_text(v))
+        group_ticks(ax, [st.PLATFORM_LABEL[p] for p in platforms])
+        if not drawn:
+            empty_panel(ax)
+            continue
+        drawn_any = True
+        scale_axes([ax], drawn, log, ylabel)
+        if tag.startswith("read_recall"):
+            zoom_recall(ax, drawn)
+    if not drawn_any:
+        plt.close(fig)
+        raise NoData("no LongPhase methylation values of %s on %s" % (sample, ref))
+    legend_ax = fig.add_subplot(grid[1, :])
+    legend_ax.axis("off")
+    top_legend(legend_ax, legend_patches([(label, alpha, hatch)
+                                          for _, alpha, hatch, label in LONGPHASE_METH]))
+    paper_title(fig, title)
+    return save(fig, ctx, fig_name("figB5_longphase_methylation", sample, ref))
 
 
 # ---------------------------------------------------------- C: assemblies
@@ -453,6 +508,8 @@ def main():
                     for number, metric in enumerate(METRICS_B, 1):
                         results.append(run("B %s %s %s" % (sample, ref, metric[0]),
                                            figB_metric, db, ctx, sample, ref, number, metric))
+                    results.append(run("B %s %s LongPhase 5mC" % (sample, ref),
+                                       figB5, db, ctx, sample, ref))
         if "C" in only:
             db = Metrics(ctx.root, sample, st.REGION, readacc_rules=ctx.rules).load(
                 refs, ["truth"] + ASSEMBLERS, st.PLATFORMS, [ctx.asm_depth], st.PHASERS + ["dipcall"])

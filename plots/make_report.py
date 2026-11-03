@@ -94,20 +94,22 @@ FIGURES = [
     ("figS4_reads_tagged", True, "Reads assigned a haplotype (by read count)",
      "As above, counting reads instead of bases. A read without a het SNP cannot be tagged, and "
      "ONT has many short reads, so by read count ONT looks worse than by bases."),
-    ("fig7b_read_precision", True, "Read-level precision",
-     TRUTH_INPUT + " Reads on the truth haplotype, of the reads tagged both by the run and by "
-     "the truth. Phase blocks oriented by their SNPs."),
-    ("fig7c_read_recall", True, "Read-level recall",
-     TRUTH_INPUT + " Reads on the truth haplotype, of the reads tagged by the truth."),
-    ("fig7d_anchor_vs_variant_orientation", True, "Two ways to orient phase blocks",
-     "Every run. Reads on the wrong haplotype with blocks oriented by their SNPs (x) and by an "
-     "anchor read (y). Dashed line: equal."),
-    ("fig7g_anchor_vs_variant_recall_ratio", True,
+    ("fig7b_read_precision_matpat", True, "Read-level precision",
+     TRUTH_INPUT + " Reads are labelled by the parental copy of the HG002 Q100 assembly they "
+     "align to better (the same reads on both references, 2 truth het SNPs or more). Tagged "
+     "reads on their parental haplotype, of those in a phase block oriented by its SNPs."),
+    ("fig7c_read_recall_matpat", True, "Read-level recall",
+     TRUTH_INPUT + " Labelled reads (Q100 parental labels, as above) tagged to their parental "
+     "haplotype, of all labelled reads."),
+    ("fig7d_anchor_vs_variant_orientation_matpat", True, "Two ways to orient phase blocks",
+     "Every run. Reads on the wrong parental haplotype (Q100 labels) with blocks oriented by "
+     "their SNPs (x) and by an anchor read (y). Dashed line: equal."),
+    ("fig7g_anchor_vs_variant_recall_ratio_matpat", True,
      "Comparison of haplotagging error rates using different phase-block orientation strategies",
-     "Every run. x: truth-tagged reads not assigned to their haplotype (1 - read recall) with phase "
-     "blocks oriented by their SNPs; y: how many times more there are with blocks oriented by an "
-     "anchor read (the longest read of the block with a truth label). Dashed line: no difference. "
-     "y from 0.8 to 2, runs outside it are not drawn."),
+     "Every run. x: labelled reads (Q100 parental labels) not tagged to their parental haplotype "
+     "(1 - read recall) with phase blocks oriented by their SNPs; y: how many times more there "
+     "are with blocks oriented by an anchor read (the longest labelled read of the block). "
+     "Dashed line: no difference. y from 0.8 to 2, runs outside it are not drawn."),
     ("fig8_switch_rate_by_stratum_30x", True, "Switch error rate by genomic context, 30x",
      TRUTH_INPUT + " GIAB stratifications v3.6, inside the benchmark regions, chr1-22."),
 ]
