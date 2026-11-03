@@ -55,6 +55,7 @@
 #   SUPPORTED_JOBS=2 PHASING_PLATFORMS=hifi bash bin/supported_grid.sh
 #   SUPPORTED_STAGES=paths bash bin/supported_grid.sh             prints where one cell writes, runs nothing
 #   SUPPORTED_STAGES=meth REFERENCE_NAME=T2T bash bin/supported_grid.sh
+#   SUPPORTED_SAMTOOLS=/path/to/samtools bash bin/supported_grid.sh   samtools 1.13+ for depth, if data_config's is older
 #   python plots/make_plots.py --root /autofs/bal36/dten/phasing_benchmark/supported \
 #       --out /autofs/bal36/dten/phasing_benchmark/supported/plots/pdf
 
@@ -82,6 +83,8 @@ case "${SUPPORTED_ROOT}" in
   "${PROJECT_ROOT}"/?*) ;;
   *) die "SUPPORTED_ROOT must be a folder inside ${PROJECT_ROOT}: ${SUPPORTED_ROOT}" ;;
 esac
+# samtools depth --excl-flags needs 1.13+; data_config's samtools may be older
+SAMTOOLS="${SUPPORTED_SAMTOOLS:-${SAMTOOLS}}"
 { "${SAMTOOLS}" depth 2>&1 || true; } | grep -q -- '--excl-flags' \
   || die "${SAMTOOLS} depth has no --excl-flags (samtools 1.13 or newer needed)"
 mkdir -p "${SUPPORTED_ROOT}"/{locks,done,logs,data}
