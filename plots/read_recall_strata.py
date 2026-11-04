@@ -23,6 +23,8 @@ Truth (--truth-source):
   matpat     the parental copy of the HG002 Q100 assembly a read fits better
              (bin/matpat_truth.sh, reads/<cell>.matpat.tsv.gz), PAT -> 0
   yak        parental k-mers (bin/yak_truth.sh, reads/<cell>.yak.tsv.gz)
+  kmer       the same counts, PAT/MAT by the share of the read's
+             parent-specific k-mers (bin/yak_truth.sh, reads/<cell>.kmer.tsv.gz)
 matpat and yak do not depend on a reference or a VCF: given the same reads,
 the read table, allele matrix and strata of one reference (T2T) for runs on
 both, every run is scored against the same reads, labels and regions.
@@ -92,7 +94,7 @@ def main():
     ap.add_argument("--reads-table", required=True)
     ap.add_argument("--truth-alleles", required=True, help="reads/<cell>_truth.reads.tsv.gz")
     ap.add_argument("--truth-tags", required=True, help="the labels, as --truth-source says")
-    ap.add_argument("--truth-source", choices=["truthtags", "matpat", "yak"], default="truthtags")
+    ap.add_argument("--truth-source", choices=["truthtags", "matpat", "yak", "kmer"], default="truthtags")
     ap.add_argument("--orient", choices=["snps", "reads"], default="snps")
     ap.add_argument("--truth-haplotags", default=None,
                     help="matpat, yak with --orient snps: whatshap haplotag list against the truth VCF "

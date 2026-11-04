@@ -34,7 +34,7 @@ from matplotlib.ticker import (FixedLocator, Formatter, FuncFormatter, LogLocato
                                NullLocator)
 
 import style as st
-from data import NAN, ratio
+from data import NAN, READ_TRUTH, ratio
 
 
 class NoData(Exception):
@@ -1595,7 +1595,7 @@ def fig6c(db, ctx):
                              recall_pct, "Correctly phased truth het SNPs (%)", log=False)
 
 
-def matpat_recall(db, sfx="_matpat"):
+def matpat_recall(db, sfx="_" + READ_TRUTH):
     """read recall against the Q100 parental-copy labels, genome-wide, by
     (reference, caller, platform, depth, phaser): metrics_reads/
     summary_recall_strata<sfx>.tsv of READ_TRUTH=matpat bin/read_recall_strata.sh,
@@ -1627,8 +1627,8 @@ def fig6d(db, ctx):
     """Fig. 1e right (by platform), Fig. 2f (by technology)"""
     recall = matpat_recall(db)
     if not recall:
-        raise NoData("no metrics_reads/summary_recall_strata_matpat.tsv - run "
-                     "READ_TRUTH=matpat bash bin/read_recall_strata.sh on both references")
+        raise NoData("no metrics_reads/summary_recall_strata_%s.tsv - run READ_TRUTH=%s "
+                     "bash bin/read_recall_strata.sh on both references" % (READ_TRUTH, READ_TRUTH))
     return reference_files(db, ctx, "fig6d_reference_read_recall_matpat",
                            lambda db, key: recall.get(key, NAN),
                            "Read haplotagging recall (%)", "read haplotagging recall",
@@ -1645,8 +1645,8 @@ def fig6e(db, ctx):
     of Fig. 1e."""
     recall = matpat_recall(db)
     if not recall:
-        raise NoData("no metrics_reads/summary_recall_strata_matpat.tsv - run "
-                     "READ_TRUTH=matpat bash bin/read_recall_strata.sh on both references")
+        raise NoData("no metrics_reads/summary_recall_strata_%s.tsv - run READ_TRUTH=%s "
+                     "bash bin/read_recall_strata.sh on both references" % (READ_TRUTH, READ_TRUTH))
     pairs = reference_pairs(db, lambda db, key: recall.get(key, NAN))
     a, b = st.REFERENCES[0], st.REFERENCES[1]
     fig = plt.figure(figsize=panel_size("fig1d"), constrained_layout=True)

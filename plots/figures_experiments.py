@@ -64,7 +64,7 @@ from matplotlib.ticker import MaxNLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
-from data import Metrics, _read_table, num, ratio, sample_root
+from data import READ_TRUTH, Metrics, _read_table, num, ratio, sample_root
 from figures import (NoData, empty_panel, finite, matpat_precision_pct, matpat_recall, matpat_recall_pct,
                      n50_mb, panel_row, paper_title, positive, save, switch_pct, top_legend)
 
@@ -108,7 +108,7 @@ METRICS = [
 READS_WRONG = ("reads_wrong_matpat", "Tagged reads on the wrong\nparental haplotype (%)", reads_wrong_pct, False)
 
 
-B_RECALL_SFX = "_matpat_own_min0"
+B_RECALL_SFX = "_%s_own_min0" % READ_TRUTH
 _b_recall = {}
 
 

@@ -31,6 +31,13 @@ from style import applies as phaser_applies
 
 NAN = float("nan")
 
+# the parental read labels behind read recall and precision in every figure
+# (Metrics.matpat and what reads it): matpat, the Q100 copy a read fits
+# better, or kmer, the share of its parent-specific k-mers (bin/yak_truth.sh).
+# READ_TRUTH=kmer python plots/make_plots.py --out <a folder of its own>: the
+# file names keep _matpat
+READ_TRUTH = os.environ.get("READ_TRUTH", "matpat")
+
 ROW_COLUMNS = [
     "reference", "region", "caller", "platform", "depth", "phaser",
     "variants", "phased", "phased_fraction", "blocks", "block_n50",
@@ -240,8 +247,8 @@ class Metrics:
         return self.calls.get((ref, caller, platform, depth), {}).get(column, NAN)
 
     def matpat(self, key, stratum="genome"):
-        """Reads against the Q100 parental labels, from
-        metrics_reads/summary_recall_strata_matpat.tsv (READ_TRUTH=matpat
+        """Reads against the parental labels of READ_TRUTH (Q100 by default), from
+        metrics_reads/summary_recall_strata_<READ_TRUTH>.tsv (READ_TRUTH=matpat
         bin/read_recall_strata.sh): the same reads on both references (primary
         on both, a parental label, 2 truth het SNPs or more), placed in the
         strata of T2T-CHM13. {truth_tagged, compared, correct}, or None.
@@ -249,7 +256,7 @@ class Metrics:
           precision = correct / compared (tagged in a block the truth orients)"""
         if self._matpat is None:
             self._matpat = {}
-            for r in _read_table(os.path.join(self.reads_dir, "summary_recall_strata_matpat.tsv")):
+            for r in _read_table(os.path.join(self.reads_dir, "summary_recall_strata_%s.tsv" % READ_TRUTH)):
                 try:
                     k = (r["reference"], r["caller"], r["platform"], int(float(r["depth"])),
                          r["phaser"], r["stratum"])

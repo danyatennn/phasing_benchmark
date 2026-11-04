@@ -12,7 +12,8 @@
 #              regions, read table and allele matrix of that reference
 #   matpat     parental copy of the Q100 assembly (bin/matpat_truth.sh)
 #   yak        parental k-mers (bin/yak_truth.sh)
-# matpat and yak depend on no reference: the reads are the same on both, so
+#   kmer       parental k-mers by our share rule (bin/yak_truth.sh)
+# matpat, yak and kmer depend on no reference: the reads are the same on both, so
 # every run, GRCh38 or T2T, is scored on the reads, labels, chr1-22, het SNP
 # count and strata of REGION_REF (T2T by default) - the same denominator and
 # the same regions on both references. READ_RECALL_COMMON=0 drops that: each
@@ -55,8 +56,8 @@ READ_RECALL_TIER="${READ_RECALL_TIER-1}"   # 1: tier-1 strata (default); empty: 
 READ_TRUTH="${READ_TRUTH:-truthtags}"
 case "${READ_TRUTH}" in
   truthtags)  REGION_REF="${REFERENCE_NAME}"; RECALL_SFX="" ;;
-  matpat|yak) REGION_REF="${REGION_REF:-T2T}"; RECALL_SFX="_${READ_TRUTH}" ;;
-  *) die "READ_TRUTH must be truthtags, matpat or yak, not ${READ_TRUTH}" ;;
+  matpat|yak|kmer) REGION_REF="${REGION_REF:-T2T}"; RECALL_SFX="_${READ_TRUTH}" ;;
+  *) die "READ_TRUTH must be truthtags, matpat, yak or kmer, not ${READ_TRUTH}" ;;
 esac
 [[ "${READ_RECALL_COMMON}" == 0 || "${READ_RECALL_COMMON}" == 1 ]] \
   || die "READ_RECALL_COMMON must be 0 or 1, not ${READ_RECALL_COMMON}"

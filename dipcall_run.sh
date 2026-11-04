@@ -22,6 +22,12 @@
 # Score with:
 #   PHASING_CALLERS="hifiasm hifiasmtrio verkkotrio" PHASING_PHASERS=dipcall \
 #   PHASING_DEPTHS="20 30 50" bash eval_run.sh
+#
+# The assembly is also a variant caller: its het SNPs, with every phase and
+# phase set removed, are written as a caller's phaser input
+#   vcf/<platform>_<ref>_<sample>_<depth>x_<region>_<assembler>.het_snps.vcf.gz
+# so that the read-based phasers run on them like on Clair3's calls:
+#   PHASING_CALLERS=hifiasmtrio PHASING_PLATFORMS=hifi PHASING_DEPTHS=30 bash phase_run.sh
 
 set -euo pipefail
 
@@ -29,7 +35,7 @@ source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline
 source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
-mkdir -p "${PHASE_DIR}" "${LOGS_DIR}/dipcall"
+mkdir -p "${PHASE_DIR}" "${VCF_DIR}" "${LOGS_DIR}/dipcall"
 
 dipcall_one() {
   local assembler="$1" platform="$2" depth="$3"
@@ -96,11 +102,32 @@ dipcall_one() {
   log "${name}: $("${BCFTOOLS}" index -n "${out}") het SNPs in $(cut -f3 "${pre}.blk.ps.tsv" | sort -u | wc -l) phase sets"
 }
 
+# dipcall_input <assembler> <platform> <depth> - the dipcall VCF as a caller's
+# phaser input: the same het SNPs (autosomes, confident BED x dip.bed), GT
+# unphased, no PS. Rebuilt when the dipcall VCF is newer.
+dipcall_input() {
+  local assembler="$1" platform="$2" depth="$3"
+  local src; src="${PHASE_DIR}/$(vcf_name "${platform}" "${depth}" "${assembler}" dipcall).vcf.gz"
+  local het; het="${VCF_DIR}/$(vcf_name "${platform}" "${depth}" "${assembler}").het_snps.vcf.gz"
+  is_done "${src}" || return 0
+  newer_than "${het}" "${src}" && return 0
+  "${BCFTOOLS}" annotate -x FORMAT/PS "${src}" \
+    | "${BCFTOOLS}" +setGT - -- -t a -n u \
+    | "${BCFTOOLS}" view -Oz -o "${het}.tmp"
+  "${TABIX}" -f -p vcf "${het}.tmp"
+  local leaked; leaked="$("${BCFTOOLS}" query -f '[%GT]\n' "${het}.tmp" | awk '/\|/ { n++ } END { print n + 0 }')"
+  [[ "${leaked}" -eq 0 ]] || { rm -f "${het}.tmp" "${het}.tmp.tbi"; die "${het}: ${leaked} genotypes still phased"; }
+  mv -f "${het}.tmp.tbi" "${het}.tbi"
+  mv -f "${het}.tmp" "${het}"
+  log "$(basename "${het}"): $("${BCFTOOLS}" index -n "${het}") het SNPs, unphased, for the phasers"
+}
+
 log "dipcall: ${ASM_CALLERS[*]} x ${ASM_PLATFORMS[*]} x ${ASM_DEPTHS[*]} against ${REFERENCE_NAME}"
 for assembler in "${ASM_CALLERS[@]}"; do
   for platform in "${ASM_PLATFORMS[@]}"; do
     for depth in "${ASM_DEPTHS[@]}"; do
       dipcall_one "${assembler}" "${platform}" "${depth}"
+      dipcall_input "${assembler}" "${platform}" "${depth}"
     done
   done
 done
