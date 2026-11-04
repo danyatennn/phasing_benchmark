@@ -33,22 +33,22 @@ require_file "${TRIO_DIR}/mat.yak" "maternal k-mers - run trio_kmers.sh"
 mkdir -p "${READS_DIR}" "${LOGS_DIR}/reads"
 
 # kmer_labels <yak table> <out> <cell> - PAT/MAT/none by the share of the
-# read's parent-specific k-mers. Columns 4 and 5 of the yak table are taken as
-# yak's paternal and maternal counts; that is checked against yak's own p/m
-# calls before anything is written. A change of KMER_MIN_* needs the kmer
+# read's parent-specific k-mers. Columns 6 and 7 of the yak table (yak's 4th
+# and 5th numbers) are the paternal and maternal counts yak itself decides p/m
+# by; that is checked against yak's own p/m calls before anything is written. A change of KMER_MIN_* needs the kmer
 # tables removed, they are kept while newer than the yak table.
 kmer_labels() {
   local yak="$1" out="$2" cell="$3" agree
   agree="$(gzip -dc "${yak}" | awk -F'\t' '!/^#/ && ($3 == "p" || $3 == "m") {
-      n++; if (($3 == "p" && $4 + 0 > $5 + 0) || ($3 == "m" && $5 + 0 > $4 + 0)) a++ }
+      n++; if (($3 == "p" && $6 + 0 > $7 + 0) || ($3 == "m" && $7 + 0 > $6 + 0)) a++ }
       END { printf "%.4f", n ? a / n : 0 }')"
-  awk -v a="${agree}" 'BEGIN { exit !(a >= 0.95) }' \
-    || die "${cell}: columns 4-5 of ${yak} do not look like yak's paternal/maternal counts (they agree with its p/m calls on ${agree} of the reads); first line: $(gzip -dc "${yak}" | awk '!/^#/ { print; exit }')"
+  awk -v a="${agree}" 'BEGIN { exit !(a >= 0.999) }' \
+    || die "${cell}: columns 6-7 of ${yak} do not look like yak's paternal/maternal counts (they agree with its p/m calls on ${agree} of the reads); first line: $(gzip -dc "${yak}" | awk '!/^#/ { print; exit }')"
   gzip -dc "${yak}" \
     | awk -F'\t' -v OFS='\t' -v f="${KMER_MIN_FRAC}" -v c="${KMER_MIN_COUNT}" '
         BEGIN { print "#read", "label", "pat", "mat" }
         /^#/ { next }
-        { p = $4 + 0; m = $5 + 0; l = "none"
+        { p = $6 + 0; m = $7 + 0; l = "none"
           if (p >= c && p >= f * (p + m)) l = "PAT"
           else if (m >= c && m >= f * (p + m)) l = "MAT"
           print $1, l, p, m }' \
