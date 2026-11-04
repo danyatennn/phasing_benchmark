@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Consensus parental-haplotype truth for the reads of HG002 cells: a read is
-# PAT or MAT when at least two of three independent-ish labels say so.
+# Consensus parental-haplotype truth for the reads of a cell: a read is PAT or
+# MAT when at least two of three independent-ish labels say so. "Q100" below is
+# the sample's diploid assembly (Q100_FASTA, config.sh): Q100 for HG002, the
+# HPRC trio assemblies for HG005r2.
 #
 #   matpat   the Q100 copy the read aligns to better, alignment-score margin
 #            (bin/matpat_truth.sh, reads/<cell>.matpat.tsv.gz)
@@ -42,7 +44,7 @@ source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline
 source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
-[[ "${SAMPLE}" == HG002 ]] || die "the Q100 assembly is HG002's; there is none for ${SAMPLE}"
+[[ -n "${Q100_FASTA}" ]] || die "no diploid assembly for ${SAMPLE}: set diploid_fasta in ${SAMPLES_TSV} (bin/asm_truth.sh writes one)"
 require_file "${Q100_FASTA}" "diploid HG002 Q100 assembly"
 
 CONSENSUS_THREADS="${CONSENSUS_THREADS:-32}"

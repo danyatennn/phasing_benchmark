@@ -18,7 +18,7 @@ source "/autofs/bal19/zxzheng/somatic/Clair-somatic/scripts/data_config_germline
 source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
-[[ "${SAMPLE}" == HG002 ]] || die "the Q100 assembly is HG002's; there is none for ${SAMPLE}"
+[[ -n "${Q100_FASTA}" ]] || die "no diploid assembly for ${SAMPLE}: set diploid_fasta in ${SAMPLES_TSV} (bin/asm_truth.sh writes one)"
 require_file "${Q100_FASTA}" "diploid HG002 Q100 assembly (download it, or set Q100_FASTA)"
 MATPAT_THREADS="${MATPAT_THREADS:-32}"
 MATPAT_MIN_DIFF="${MATPAT_MIN_DIFF:-10}"

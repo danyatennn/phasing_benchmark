@@ -295,5 +295,11 @@ DIPCALL_THREADS="${DIPCALL_THREADS:-16}"
 
 # The diploid HG002 Q100 assembly, maternal and paternal chromosomes in one
 # FASTA (chrN_MATERNAL, chrN_PATERNAL), for the parental-haplotype truth of
-# bin/matpat_truth.sh
-Q100_FASTA="${Q100_FASTA:-${PROJECT_ROOT}/data/q100/hg002v1.1.fasta.gz}"
+# bin/matpat_truth.sh and bin/consensus_truth.sh. Any other sample takes its
+# own diploid assembly from samples.tsv (diploid_fasta), contigs named
+# <contig>_MATERNAL / <contig>_PATERNAL (bin/asm_truth.sh writes one), or none.
+if [[ "${SAMPLE}" == HG002 ]]; then
+  Q100_FASTA="${Q100_FASTA:-${PROJECT_ROOT}/data/q100/hg002v1.1.fasta.gz}"
+else
+  Q100_FASTA="${Q100_FASTA:-$(sample_path "${SAMPLE}" diploid_fasta)}"
+fi
