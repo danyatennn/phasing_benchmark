@@ -102,7 +102,7 @@ def path_of(ctx, *parts):
 # reads, chr1-22 and regions (T2T) for both references, blocks oriented by
 # their SNPs against each reference's truth VCF
 READ_TRUTH_LABEL = {"matpat": "Q100 parental-copy truth", "yak": "parental k-mer truth",
-                    "kmer": "parental k-mer share truth"}
+                    "kmer": "parental k-mer share truth", "consensus": "consensus parental truth"}
 
 
 def parental(ctx):
@@ -1682,7 +1682,7 @@ def main():
     ap.add_argument("--min-slice", type=float, default=0.025,
                     help="R5: smallest drawn slice, as a fraction of the ring (0: true sizes)")
     ap.add_argument("--top", type=int, default=7, help="R9: columns per group")
-    ap.add_argument("--read-truth", choices=["truthtags", "matpat", "yak", "kmer"], default="truthtags",
+    ap.add_argument("--read-truth", choices=["truthtags", "matpat", "yak", "kmer", "consensus"], default="truthtags",
                     help="R15, R16, R18: read labels (matpat, yak: no reference, T2T regions)")
     ap.add_argument("--png", action="store_true")
     ctx = ap.parse_args()

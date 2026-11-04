@@ -33,7 +33,8 @@ NAN = float("nan")
 
 # the parental read labels behind read recall and precision in every figure
 # (Metrics.matpat and what reads it): matpat, the Q100 copy a read fits
-# better, or kmer, the share of its parent-specific k-mers (bin/yak_truth.sh).
+# better, kmer, the share of its parent-specific k-mers (bin/yak_truth.sh), or
+# consensus, two of those and the Q100 SNP alleles (bin/consensus_truth.sh).
 # READ_TRUTH=kmer python plots/make_plots.py --out <a folder of its own>: the
 # file names keep _matpat
 READ_TRUTH = os.environ.get("READ_TRUTH", "matpat")

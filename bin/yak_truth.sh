@@ -8,8 +8,8 @@
 #   reads/<cell>.kmer.tsv.gz     read label(PAT/MAT/none) by our own rule on
 #                                yak's counts: PAT or MAT if that parent holds
 #                                at least KMER_MIN_FRAC (0.8) of the read's
-#                                parent-specific k-mers (pat + mat) and more
-#                                than KMER_MIN_COUNT (3) of them; READ_TRUTH=kmer
+#                                parent-specific k-mers (pat + mat) and at
+#                                least KMER_MIN_COUNT (3) of them; READ_TRUTH=kmer
 #
 # Kept when newer than the BAM and the k-mer databases; the kmer table when
 # newer than the yak table.
@@ -49,13 +49,13 @@ kmer_labels() {
         BEGIN { print "#read", "label", "pat", "mat" }
         /^#/ { next }
         { p = $4 + 0; m = $5 + 0; l = "none"
-          if (p > c && p >= f * (p + m)) l = "PAT"
-          else if (m > c && m >= f * (p + m)) l = "MAT"
+          if (p >= c && p >= f * (p + m)) l = "PAT"
+          else if (m >= c && m >= f * (p + m)) l = "MAT"
           print $1, l, p, m }' \
     | "${BGZIP}" -c >"${out}.tmp" \
     || die "kmer labels failed for ${cell}"
   mv -f "${out}.tmp" "${out}"
-  log "${cell}: kmer labels (>= ${KMER_MIN_FRAC} of more than ${KMER_MIN_COUNT} parent-specific k-mers, yak p/m agree ${agree}): $(gzip -dc "${out}" | awk -F'\t' 'NR > 1 { n[$2]++ } END { printf "PAT %d, MAT %d, none %d", n["PAT"], n["MAT"], n["none"] }')"
+  log "${cell}: kmer labels (>= ${KMER_MIN_FRAC} of the parent-specific k-mers, >= ${KMER_MIN_COUNT} of them, yak p/m agree ${agree}): $(gzip -dc "${out}" | awk -F'\t' 'NR > 1 { n[$2]++ } END { printf "PAT %d, MAT %d, none %d", n["PAT"], n["MAT"], n["none"] }')"
 }
 
 for platform in "${PLATFORMS[@]}"; do
