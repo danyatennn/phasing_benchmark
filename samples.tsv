@@ -58,8 +58,10 @@ HG005	mat_reads	$HG007_PACBIO_30x_GRCH38_BAM
 # HG005 again, its own runs: the v4.2.1 het SNPs phased by the HPRC release 2
 # hifiasm-trio assemblies (bin/asm_truth.sh), only those they phase with
 # confidence, in the v4.2.1 BED x dip.bed. HG005 keeps the v4.2.1 phase.
-HG005r2	bam_ont5k	$ONT_HG005_V14_5KHZ_NO_ALT_BAM
-HG005r2	bam_hifi	$PB_HG005_NO_ALT_BAM
+# The reads are HG005's own 30x BAMs, so both truths are scored on the same
+# reads (and the ONT source BAM is gone from its old path).
+HG005r2	bam_ont5k	/autofs/bal36/dten/phasing_benchmark/samples/HG005/data/ont5k_GRCh38_HG005_30x_wgs/input.bam
+HG005r2	bam_hifi	/autofs/bal36/dten/phasing_benchmark/samples/HG005/data/hifi_GRCh38_HG005_30x_wgs/input.bam
 HG005r2	truth_GRCh38	/autofs/bal36/dten/phasing_benchmark/data/hg005_hprc_r2/truth_GRCh38/HG005_GRCh38_v4.2.1_asmphased.vcf.gz
 HG005r2	bed_GRCh38	/autofs/bal36/dten/phasing_benchmark/data/hg005_hprc_r2/truth_GRCh38/HG005_GRCh38_v4.2.1_asmphased.bed
 HG005r2	pat_reads	$HG006_PACBIO_30x_GRCH38_BAM
