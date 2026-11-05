@@ -658,6 +658,9 @@ STRATA_R10 = [
     ("satellites_slop5", "Satellites"),
     ("MHC", "MHC"),
 ]
+# the bubbles (figR19) put MHC before the satellites
+BUBBLE_STRATA = [s for s in STRATA_R10 if s[0] not in ("MHC", "satellites_slop5")] + [
+    ("MHC", "MHC"), ("satellites_slop5", "Satellites")]
 R10_METRICS = [
     ("switch", "Switch error rate (%)"),
     ("n50", "Block N50 (Mb)"),
@@ -1506,7 +1509,7 @@ def fig_r19(ctx):
             n = num(r["assessed"])
             if r["reference"] == ref and n > 0:
                 switch[(r["platform"], r["stratum"])] = (100 * num(r["switches"]) / n, n)
-        strata = [(s_, l) for s_, l in STRATA_R10 if any(k[1] == s_ for k in switch)]
+        strata = [(s_, l) for s_, l in BUBBLE_STRATA if any(k[1] == s_ for k in switch)]
         if strata:
             fig = bubble_figure(switch, strata, "Switch error rate (%)", "Switch error rate by region",
                                 from_zero=True)
@@ -1521,7 +1524,7 @@ def fig_r19(ctx):
             acc[0] += mid * sites
             acc[1] += sites
         vaf = {k: (a / n, n) for k, (a, n) in sums.items() if n > 0}
-        strata = [(s_, l) for s_, l in STRATA_R10 if any(k[1] == s_ for k in vaf)]
+        strata = [(s_, l) for s_, l in BUBBLE_STRATA if any(k[1] == s_ for k in vaf)]
         if strata:
             fig = bubble_figure(vaf, strata, "Mean VAF of het SNPs", "Mean VAF of het SNPs by region", hline=0.5)
             made.append(save(fig, ctx, "figR19b_vaf_bubbles_%s" % ref))

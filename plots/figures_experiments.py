@@ -168,9 +168,9 @@ PAPER = {
     "figA1": ("experiment", False, "Impact of additional variant types on switch error rate"),
     "figA3": ("experiment", False, "Impact of additional variant types on phase-block NG50"),
     "figA4": ("experiment_legend", True, "Impact of additional variant types on read haplotagging recall"),
-    "figB1": ("experiment", False, "Effect of DNA methylation integration on switch error rate"),
-    "figB3": ("experiment", False, "Effect of DNA methylation integration on phase-block NG50"),
-    "figB4": ("experiment_legend", True, "Effect of DNA methylation integration on read haplotagging recall"),
+    "figB1": ("experiment_meth", False, "Effect of DNA methylation integration on switch error rate"),
+    "figB3": ("experiment_meth", False, "Effect of DNA methylation integration on phase-block NG50"),
+    "figB4": ("experiment_meth_legend", True, "Effect of DNA methylation integration on read haplotagging recall"),
     "figB5": ("experiment_legend", True, "MethPhaser and LongPhase 5mC mode (modcall) on LongPhase"),
 }
 

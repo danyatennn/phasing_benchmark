@@ -139,6 +139,11 @@ PAPER_PANELS = {
     "fig5d": (PAGE_WIDTH, 88),     # Fig. 2g
     "experiment": (PAGE_WIDTH, 62),         # Fig. 3a, 3c, no legend
     "experiment_legend": (PAGE_WIDTH, 68),  # Fig. 3b, 3d
+    # the methylation figure: the MethPhaser schematic on top, 170 x 70 mm,
+    # then B1, B3, B4 a little lower than the other experiment panels, so the
+    # page stays within 230 mm: 70 + 50 + 50 + 56 and the gaps
+    "experiment_meth": (PAGE_WIDTH, 50),         # figB1, figB3
+    "experiment_meth_legend": (PAGE_WIDTH, 56),  # figB4, the legend under it
     "regions_profile": (84, 80),   # figR13a beside figR13b
     "bubbles": (84, 58),           # figR19a beside figR19b
     "enrichment": (103, 90),       # fig11a, under the bubbles

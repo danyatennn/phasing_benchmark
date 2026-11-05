@@ -197,10 +197,17 @@ for caller in "${CALLERS[@]}"; do
 done | shard | "${PARALLEL}" --joblog "${joblog}" --colsep '\t' -j "${REGIONS_JOBS}" \
     phase_one_region {1} {2} {3} {4} {5} || true
 
+# rows_of <prefix> - every <prefix>*.row.tsv of METRICS_STRATA_DIR, in name
+# order. find, not a glob: with tens of thousands of rows the glob outgrows the
+# argument limit and cat never runs
+rows_of() {
+  find "${METRICS_STRATA_DIR}" -maxdepth 1 -name "$1*.row.tsv" -print0 | LC_ALL=C sort -z | xargs -0 -r cat
+}
+
 {
   printf 'reference\tregion\tcaller\tplatform\tdepth\tstratum'
   printf '\ttruth_total\temitted\tshared\tfp\tfn\tprecision\trecall\tf1\n'
-  cat "${METRICS_STRATA_DIR}"/calls_*.row.tsv 2>/dev/null
+  rows_of calls_
 } >"${METRICS_STRATA_DIR}/summary_calls_strata.tsv.$$"
 mv -f "${METRICS_STRATA_DIR}/summary_calls_strata.tsv.$$" "${METRICS_STRATA_DIR}/summary_calls_strata.tsv"
 
@@ -210,7 +217,7 @@ mv -f "${METRICS_STRATA_DIR}/summary_calls_strata.tsv.$$" "${METRICS_STRATA_DIR}
   printf '\tswitches\tswitch_rate\thamming\thamming_rate'
   printf '\tcovered\tassessed\ttruth_total\temitted\tshared\tcorrect'
   printf '\tfnr\tfdr\trecall_phased\tprecision_phased\n'
-  cat "${METRICS_STRATA_DIR}"/phase_*.row.tsv 2>/dev/null
+  rows_of phase_
 } >"${METRICS_STRATA_DIR}/summary_phase_strata.tsv.$$"
 mv -f "${METRICS_STRATA_DIR}/summary_phase_strata.tsv.$$" "${METRICS_STRATA_DIR}/summary_phase_strata.tsv"
 
