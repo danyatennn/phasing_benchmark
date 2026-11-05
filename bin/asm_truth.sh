@@ -101,10 +101,15 @@ bed_intersect "${work}/bench.auto.bed" "${work}/dip.auto.bed" >"${work}/region.b
   | "${BGZIP}" -c >"${work}/asm.region.vcf.gz"
 for f in v421.bench v421.region asm.region; do "${TABIX}" -f -p vcf "${work}/${f}.vcf.gz"; done
 
-# the same het SNP in both, the record and phase of the assemblies
-"${BCFTOOLS}" isec -c none -n=2 -w2 -Oz -o "${base}.tmp.vcf.gz" \
+# the same het SNP in both, the record and phase of the assemblies, under
+# the sample's name (dipcall writes its own), as is the v4.2.1 copy compared
+printf '%s\n' "${SAMPLE}" >"${work}/sample.txt"
+"${BCFTOOLS}" isec -c none -n=2 -w2 -Oz -o "${work}/kept.vcf.gz" \
   "${work}/v421.region.vcf.gz" "${work}/asm.region.vcf.gz"
+"${BCFTOOLS}" reheader -s "${work}/sample.txt" -o "${base}.tmp.vcf.gz" "${work}/kept.vcf.gz"
 "${TABIX}" -f -p vcf "${base}.tmp.vcf.gz"
+"${BCFTOOLS}" reheader -s "${work}/sample.txt" -o "${work}/v421.cmp.vcf.gz" "${work}/v421.region.vcf.gz"
+"${TABIX}" -f -p vcf "${work}/v421.cmp.vcf.gz"
 unphased="$("${BCFTOOLS}" query -f '[%GT]\n' "${base}.tmp.vcf.gz" | awk '!/\|/ { n++ } END { print n + 0 }')"
 [[ "${unphased}" -eq 0 ]] || die "${unphased} kept records are not phased"
 
@@ -127,7 +132,7 @@ bp() { awk '{ s += $3 - $2 } END { printf "%.1f Mb", s / 1e6 }' "$1"; }
 } >"${check}.tmp"
 # the new phase against v4.2.1's, where v4.2.1 has one
 "${WHATSHAP}" compare --names asm,v4.2.1 --only-snvs --tsv-pairwise "${work}/compare.tsv" \
-    "${base}.tmp.vcf.gz" "${work}/v421.region.vcf.gz" >"${work}/compare.txt" 2>&1 \
+    "${base}.tmp.vcf.gz" "${work}/v421.cmp.vcf.gz" >"${work}/compare.txt" 2>&1 \
   || warn "whatshap compare failed, see ${work}/compare.txt"
 if [[ -s "${work}/compare.tsv" ]]; then
   awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
