@@ -199,9 +199,11 @@ done | shard | "${PARALLEL}" --joblog "${joblog}" --colsep '\t' -j "${REGIONS_JO
 
 # rows_of <prefix> - every <prefix>*.row.tsv of METRICS_STRATA_DIR, in name
 # order. find, not a glob: with tens of thousands of rows the glob outgrows the
-# argument limit and cat never runs
+# argument limit and cat never runs. -ignore_readdir_race: hosts sharing the
+# folder create and remove <row>.lock directories all the time, and a lock gone
+# between readdir and stat must not fail the summary
 rows_of() {
-  find "${METRICS_STRATA_DIR}" -maxdepth 1 -name "$1*.row.tsv" -print0 | LC_ALL=C sort -z | xargs -0 -r cat
+  find "${METRICS_STRATA_DIR}" -maxdepth 1 -ignore_readdir_race -name "$1*.row.tsv" -print0 | LC_ALL=C sort -z | xargs -0 -r cat
 }
 
 {
