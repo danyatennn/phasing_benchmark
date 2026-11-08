@@ -80,8 +80,10 @@ def het_sites(vcf, chroms):
                 if i < len(vals) and vals[i] not in (".", ""):
                     ps = vals[i]
             sites.setdefault(f[0], []).append((int(f[1]), ps))
+    # by position only: two records at one position (one phased, one not) must
+    # not compare their PS, None against a string
     for c in sites:
-        sites[c].sort()
+        sites[c].sort(key=lambda x: x[0])
     return sites
 
 
