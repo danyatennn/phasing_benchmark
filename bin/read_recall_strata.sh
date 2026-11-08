@@ -40,9 +40,12 @@
 # READ_RECALL_COMMON    matpat, yak: 1 (default) the same reads on both
 #                       references, see above; 0 the reads of the run's own reference
 # READ_RECALL_TIER      strata tier (1; empty = every stratum of strata.tsv)
+# READ_RECALL_FRACTION  share of a read's alignment inside a region for the read
+#                       to count there (0.5; 0 = any overlap, e.g. for genes)
 # A setting other than the default goes to its own files: _own for
 # READ_RECALL_COMMON=0, _min<N> for READ_RECALL_MIN_SNPS=N, _tier<N> or
-# _tierall for READ_RECALL_TIER, after the truth's sfx.
+# _tierall for READ_RECALL_TIER, _frac<F> for READ_RECALL_FRACTION=F, after the
+# truth's sfx.
 
 set -euo pipefail
 
@@ -54,6 +57,7 @@ RECALL_JOBS="${RECALL_JOBS:-4}"
 READ_RECALL_MIN_SNPS="${READ_RECALL_MIN_SNPS:-2}"
 READ_RECALL_COMMON="${READ_RECALL_COMMON:-1}"
 READ_RECALL_TIER="${READ_RECALL_TIER-1}"   # 1: tier-1 strata (default); empty: every stratum of strata.tsv
+READ_RECALL_FRACTION="${READ_RECALL_FRACTION:-0.5}"
 READ_TRUTH="${READ_TRUTH:-truthtags}"
 case "${READ_TRUTH}" in
   truthtags)  REGION_REF="${REFERENCE_NAME}"; RECALL_SFX="" ;;
@@ -63,12 +67,15 @@ esac
 [[ "${READ_RECALL_COMMON}" == 0 || "${READ_RECALL_COMMON}" == 1 ]] \
   || die "READ_RECALL_COMMON must be 0 or 1, not ${READ_RECALL_COMMON}"
 [[ "${READ_RECALL_MIN_SNPS}" =~ ^[0-9]+$ ]] || die "READ_RECALL_MIN_SNPS must be a number, not ${READ_RECALL_MIN_SNPS}"
+[[ "${READ_RECALL_FRACTION}" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]] \
+  || die "READ_RECALL_FRACTION must be a number from 0 to 1, not ${READ_RECALL_FRACTION}"
 if [[ "${READ_TRUTH}" != truthtags && "${READ_RECALL_COMMON}" == 0 ]]; then
   REGION_REF="${REFERENCE_NAME}"
   RECALL_SFX="${RECALL_SFX}_own"
 fi
 [[ "${READ_RECALL_MIN_SNPS}" == 2 ]] || RECALL_SFX="${RECALL_SFX}_min${READ_RECALL_MIN_SNPS}"
 [[ "${READ_RECALL_TIER}" == 1 ]] || RECALL_SFX="${RECALL_SFX}_tier${READ_RECALL_TIER:-all}"
+[[ "${READ_RECALL_FRACTION}" == 0.5 ]] || RECALL_SFX="${RECALL_SFX}_frac${READ_RECALL_FRACTION}"
 mkdir -p "${METRICS_READS_DIR}" "${TMP_DIR}" "${LOGS_DIR}/reads"
 
 STRATA_ARGS=""
@@ -134,7 +141,7 @@ recall_one() {
       --reads-table "${table}" --truth-alleles "${alleles}" --truth-tags "${truth_tags}" \
       --truth-source "${READ_TRUTH}" --truth-vcf "${TRUTH_PHASED}" \
       ${STRATA_ARGS} ${require} --min-snps "${READACC_MIN_SNPS}" \
-      --min-read-snps "${READ_RECALL_MIN_SNPS}" --jobs "${jobs}" \
+      --min-read-snps "${READ_RECALL_MIN_SNPS}" --stratum-fraction "${READ_RECALL_FRACTION}" --jobs "${jobs}" \
     2>>"${LOGS_DIR}/reads/${cell}_${caller}.recall_strata${RECALL_SFX}.log" \
     || { rm -f "${jobs}"; die "read recall failed for ${cell} ${caller}, see ${LOGS_DIR}/reads/${cell}_${caller}.recall_strata${RECALL_SFX}.log"; }
   rm -f "${jobs}"
@@ -143,7 +150,7 @@ recall_one() {
 PHASER_LIST="${PHASERS[*]}"
 export -f recall_one bam_key vcf_name newer_than phaser_applies stratum_bed log warn die
 export METRICS_DIR METRICS_READS_DIR PHASE_DIR READS_DIR LOGS_DIR TMP_DIR REFERENCE_NAME \
-       REGION_NAME SAMPLE TRUTH_PHASED STRATA_ARGS READACC_MIN_SNPS READ_RECALL_MIN_SNPS READ_RECALL_COMMON READ_TRUTH REGION_REF RECALL_SFX PREPARED_DIR PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
+       REGION_NAME SAMPLE TRUTH_PHASED STRATA_ARGS READACC_MIN_SNPS READ_RECALL_MIN_SNPS READ_RECALL_FRACTION READ_RECALL_COMMON READ_TRUTH REGION_REF RECALL_SFX PREPARED_DIR PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
 
 log "${SAMPLE} ${REFERENCE_NAME}: read recall per region, ${READ_TRUTH} labels, ${REGION_REF} reads and regions, reads with >= ${READ_RECALL_MIN_SNPS} truth het SNPs (${RECALL_SFX:-default} files), for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}"
 "${PARALLEL}" -j "${RECALL_JOBS}" recall_one {1} {2} {3} \

@@ -14,7 +14,8 @@ recall, the same for every run of the cell. Of those, a read is right if the
 run tags it H1/H2 in a block of --min-snps phased het SNPs or more, the block
 shares SNPs with the truth (which orient it, majority of them), and so oriented
 its label is the truth's - the rules of readacc_run.sh. A read is in a region
-if half its alignment or more lies there; "genome" is every read. Bases: the
+if --stratum-fraction of its alignment or more lies there (0.5: half; 0: any
+overlap, one base or more); "genome" is every read. Bases: the
 whole read (column length of the read table), as plots/tagged_bases.py.
 
 Truth (--truth-source):
@@ -105,6 +106,9 @@ def main():
     ap.add_argument("--stratum", action="append", default=[], help="name=bed, repeatable")
     ap.add_argument("--min-snps", type=int, default=2, help="phased het SNPs of the run's block")
     ap.add_argument("--min-read-snps", type=int, default=2, help="truth het SNPs on the read")
+    ap.add_argument("--stratum-fraction", type=float, default=STRATUM_FRACTION,
+                    help="share of a read's alignment inside a region for the read to count there "
+                         "(0.5; 0 = any overlap)")
     ap.add_argument("--require-reads", action="append", default=[],
                     help="read table; keep only reads in it, repeatable")
     ap.add_argument("--jobs", required=True)
@@ -128,6 +132,11 @@ def main():
         name, _, path = item.partition("=")
         if os.path.exists(path):
             strata.append((name, IntervalSet.from_bed(path, autosomes_only=True)))
+    # every region in one set: a read outside it is in no region, and with
+    # hundreds of regions (one per gene) that check saves testing each of them
+    union = IntervalSet([(c, s, e) for _, iv in strata for c in iv.starts
+                         for s, e in zip(iv.starts[c], iv.ends[c])])
+    frac = args.stratum_fraction
     # the regions and length of every truth-tagged read with enough truth SNPs,
     # from its primary alignment; a read missing from the read table or the
     # allele matrix is left out
@@ -145,8 +154,13 @@ def main():
                 continue
             c, s, e = f[ic], int(f[i_s]), int(f[ie])
             span = max(1, e - s)
-            region_of[r] = ("genome",) + tuple(
-                n for n, iv in strata if iv.overlap(c, s, e) >= STRATUM_FRACTION * span)
+            regions = ("genome",)
+            if union.overlap(c, s, e) > 0:
+                for n, iv in strata:
+                    ov = iv.overlap(c, s, e)
+                    if ov > 0 and ov >= frac * span:
+                        regions += (n,)
+            region_of[r] = regions
             length_of[r] = int(f[il])
     print("%s: %s labels, %d reads labelled on chr1-22, %d with >= %d truth het SNPs; blocks oriented by %s"
           % (args.reads_table, args.truth_source, len(autosomal), len(region_of), args.min_read_snps, orient),
