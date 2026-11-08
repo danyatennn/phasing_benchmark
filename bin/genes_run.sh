@@ -43,7 +43,10 @@
 #   PHASING_CALLERS (truth, the callers, the assemblies), PHASING_PLATFORMS,
 #   PHASING_PHASERS, GENES_STRATA_TIER (regions: empty = the set and every
 #   gene, 1 = the set only), GENES_RECALL_TIER (recall: empty = the set and
-#   every gene, the default; 1 = the set only)
+#   every gene, the default; 1 = the set only), GENES_RECALL_MIN_SNPS (0) and
+#   GENES_RECALL_FRACTION (0): the set alone as the genome strata are counted
+#   (reads with >= 2 truth het SNPs, half of the read inside) is
+#   GENES_RECALL_TIER=1 GENES_RECALL_MIN_SNPS=2 GENES_RECALL_FRACTION=0.5
 #
 # A trial on a few genes first: GENES_ONLY names them (the whole set is added),
 # and everything goes to metrics_genes/<set>_test/<mode>/ instead
@@ -171,7 +174,8 @@ run() {
         ;;
       recall)
         for common in ${GENES_RECALL_COMMON:-1 0}; do
-          READ_TRUTH=consensus READ_RECALL_MIN_SNPS=0 READ_RECALL_COMMON="${common}" READ_RECALL_FRACTION=0 \
+          READ_TRUTH=consensus READ_RECALL_MIN_SNPS="${GENES_RECALL_MIN_SNPS:-0}" READ_RECALL_COMMON="${common}" \
+            READ_RECALL_FRACTION="${GENES_RECALL_FRACTION:-0}" \
             READ_RECALL_TIER="${GENES_RECALL_TIER-}" bash "${PROJECT_ROOT}/bin/read_recall_strata.sh"
         done
         ;;
