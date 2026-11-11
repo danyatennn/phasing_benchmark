@@ -48,20 +48,40 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as matplotlib_colors
 
 import style as st
-from data import sample_root
+from data import GENE_SET, GENE_SET_DIR, sample_root
 from figures import (NoData, SameDecimals, colorbar, heatmap, log_ticks, same_decimals, save, series_handle,
                      sig_number, stratum_label, top_legend, y_grid)
 
 
 # ------------------------------------------------------------------ helpers
 
-def table(path):
+def plain_table(path):
     """rows of a TSV with a header, [] when the file is not there"""
     if not os.path.exists(path):
         return []
     with open(path) as fh:
         header = fh.readline().rstrip("\n").lstrip("#").split("\t")
         return [dict(zip(header, line.rstrip("\n").split("\t"))) for line in fh if line.strip()]
+
+
+# the stratum summaries of HG002 also get the gene set (data.GENE_SET) as one
+# more stratum: the same file of bin/genes_run.sh under metrics_genes/
+GENE_SET_SUB = {"metrics_strata_auto": "strata", "metrics_reads": "reads"}
+
+
+def table(path):
+    """rows of a TSV with a header, [] when the file is not there; a stratum
+    summary of HG002 (summary_{phase,calls,recall}_strata*) with the gene set's
+    row(s) of the same file added"""
+    rows = plain_table(path)
+    folder, name = os.path.split(path)
+    root = os.path.dirname(folder)
+    sub = GENE_SET_SUB.get(os.path.basename(folder))
+    if rows and sub and name.startswith("summary_") and "_strata" in name \
+            and os.path.basename(os.path.dirname(root)) != "samples":
+        rows += [r for r in plain_table(os.path.join(root, GENE_SET_DIR, sub, name))
+                 if r.get("stratum") == GENE_SET]
+    return rows
 
 
 def num(v):
@@ -472,6 +492,7 @@ STRATA_R8 = [
     ("MHC", "MHC"),
     ("KIR", "KIR"),
     ("refseq_cds", "CDS"),
+    (GENE_SET, "CMRG genes"),
 ]
 METRIC_LABEL = {"f1": "F1 score (%)", "precision": "Precision (%)", "recall": "Recall (%)"}
 
@@ -658,9 +679,11 @@ STRATA_R10 = [
     ("satellites_slop5", "Satellites"),
     ("MHC", "MHC"),
 ]
-# the bubbles (figR19) put MHC before the satellites
+# the bubbles (figR19) put MHC before the satellites; no gene set there (no VAF
+# per gene set)
 BUBBLE_STRATA = [s for s in STRATA_R10 if s[0] not in ("MHC", "satellites_slop5")] + [
     ("MHC", "MHC"), ("satellites_slop5", "Satellites")]
+STRATA_R10.append((GENE_SET, "CMRG genes"))
 R10_METRICS = [
     ("switch", "Switch error rate (%)"),
     ("n50", "Block N50 (Mb)"),

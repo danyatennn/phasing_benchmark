@@ -38,12 +38,17 @@
 # READ_RECALL_MIN_SNPS  truth het SNPs a read must cover to count (2; 0 = every
 #                       labelled read on chr1-22)
 # READ_RECALL_COMMON    matpat, yak: 1 (default) the same reads on both
-#                       references, see above; 0 the reads of the run's own reference
+#                       references, see above; 0 the reads of the run's own reference;
+#                       both: the same reads, and a read counts only where it
+#                       counts on both references - truth het SNPs of each
+#                       reference's truth, a region by each reference's own
+#                       alignment and BED - plus <cell>.eligible_both.tsv: reads
+#                       that would count on T2T, on GRCh38 and on both, per region
 # READ_RECALL_TIER      strata tier (1; empty = every stratum of strata.tsv)
 # READ_RECALL_FRACTION  share of a read's alignment inside a region for the read
 #                       to count there (0.5; 0 = any overlap, e.g. for genes)
 # A setting other than the default goes to its own files: _own for
-# READ_RECALL_COMMON=0, _min<N> for READ_RECALL_MIN_SNPS=N, _tier<N> or
+# READ_RECALL_COMMON=0, _both for READ_RECALL_COMMON=both, _min<N> for READ_RECALL_MIN_SNPS=N, _tier<N> or
 # _tierall for READ_RECALL_TIER, _frac<F> for READ_RECALL_FRACTION=F, after the
 # truth's sfx.
 
@@ -64,14 +69,21 @@ case "${READ_TRUTH}" in
   matpat|yak|kmer|consensus) REGION_REF="${REGION_REF:-T2T}"; RECALL_SFX="_${READ_TRUTH}" ;;
   *) die "READ_TRUTH must be truthtags, matpat, yak, kmer or consensus, not ${READ_TRUTH}" ;;
 esac
-[[ "${READ_RECALL_COMMON}" == 0 || "${READ_RECALL_COMMON}" == 1 ]] \
-  || die "READ_RECALL_COMMON must be 0 or 1, not ${READ_RECALL_COMMON}"
+[[ "${READ_RECALL_COMMON}" =~ ^(0|1|both)$ ]] \
+  || die "READ_RECALL_COMMON must be 0, 1 or both, not ${READ_RECALL_COMMON}"
 [[ "${READ_RECALL_MIN_SNPS}" =~ ^[0-9]+$ ]] || die "READ_RECALL_MIN_SNPS must be a number, not ${READ_RECALL_MIN_SNPS}"
 [[ "${READ_RECALL_FRACTION}" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]] \
   || die "READ_RECALL_FRACTION must be a number from 0 to 1, not ${READ_RECALL_FRACTION}"
 if [[ "${READ_TRUTH}" != truthtags && "${READ_RECALL_COMMON}" == 0 ]]; then
   REGION_REF="${REFERENCE_NAME}"
   RECALL_SFX="${RECALL_SFX}_own"
+fi
+# both: the other reference checks every read too
+OTHER_REF=""
+if [[ "${READ_RECALL_COMMON}" == both ]]; then
+  [[ "${READ_TRUTH}" != truthtags ]] || die "READ_RECALL_COMMON=both needs parental labels (READ_TRUTH)"
+  OTHER_REF="$([[ "${REGION_REF}" == T2T ]] && echo GRCh38 || echo T2T)"
+  RECALL_SFX="${RECALL_SFX}_both"
 fi
 [[ "${READ_RECALL_MIN_SNPS}" == 2 ]] || RECALL_SFX="${RECALL_SFX}_min${READ_RECALL_MIN_SNPS}"
 [[ "${READ_RECALL_TIER}" == 1 ]] || RECALL_SFX="${RECALL_SFX}_tier${READ_RECALL_TIER:-all}"
@@ -83,6 +95,12 @@ for s in $(STRATA_TIER="${READ_RECALL_TIER}" strata_names); do
   STRATA_ARGS="${STRATA_ARGS} --stratum ${s}=$(REFERENCE_NAME="${REGION_REF}" stratum_bed "${s}")"
 done
 [[ -n "${STRATA_ARGS}" ]] || warn "no strata in ${STRATA_LIST}: genome-wide rows only"
+OTHER_STRATA_ARGS=""
+if [[ -n "${OTHER_REF}" ]]; then
+  for s in $(STRATA_TIER="${READ_RECALL_TIER}" strata_names); do
+    OTHER_STRATA_ARGS="${OTHER_STRATA_ARGS} --other-stratum ${s}=$(REFERENCE_NAME="${OTHER_REF}" stratum_bed "${s}")"
+  done
+fi
 
 recall_one() {
   set -euo pipefail
@@ -101,13 +119,23 @@ recall_one() {
     [[ -s "${ref_tags}" ]] || { warn "${cell}: missing ${ref_tags}"; return 0; }
     require="--truth-haplotags ${ref_tags}"
     truth_tags="${READS_DIR}/${rcell}.${READ_TRUTH}.tsv.gz"
-    if [[ "${READ_RECALL_COMMON}" == 1 ]]; then
+    if [[ "${READ_RECALL_COMMON}" != 0 ]]; then
       for t in GRCh38 T2T; do
         t="${READS_DIR}/$(bam_key "${platform}" "${t}" "${depth}").reads.tsv.gz"
         [[ -s "${t}" ]] || { warn "${cell}: missing ${t}"; return 0; }
         require="${require} --require-reads ${t}"
       done
     fi
+  fi
+  local other=""
+  if [[ -n "${OTHER_REF}" ]]; then
+    local ocell; ocell="$(bam_key "${platform}" "${OTHER_REF}" "${depth}")"
+    for f in "${READS_DIR}/${ocell}.reads.tsv.gz" "${READS_DIR}/${ocell}_truth.reads.tsv.gz"; do
+      [[ -s "${f}" ]] || { warn "${cell}: missing ${f}"; return 0; }
+    done
+    other="--other-reads-table ${READS_DIR}/${ocell}.reads.tsv.gz"
+    other="${other} --other-truth-alleles ${READS_DIR}/${ocell}_truth.reads.tsv.gz ${OTHER_STRATA_ARGS}"
+    other="${other} --eligible-out ${METRICS_READS_DIR}/${rcell}.eligible${RECALL_SFX}.tsv"
   fi
   for f in "${table}" "${alleles}" "${truth_tags}"; do
     [[ -s "${f}" ]] || { warn "${cell}: missing ${f}"; return 0; }
@@ -140,7 +168,7 @@ recall_one() {
   "${PLOTS_PYTHON}" "${PROJECT_ROOT}/plots/read_recall_strata.py" \
       --reads-table "${table}" --truth-alleles "${alleles}" --truth-tags "${truth_tags}" \
       --truth-source "${READ_TRUTH}" --truth-vcf "${TRUTH_PHASED}" \
-      ${STRATA_ARGS} ${require} --min-snps "${READACC_MIN_SNPS}" \
+      ${STRATA_ARGS} ${require} ${other} --min-snps "${READACC_MIN_SNPS}" \
       --min-read-snps "${READ_RECALL_MIN_SNPS}" --stratum-fraction "${READ_RECALL_FRACTION}" --jobs "${jobs}" \
     2>>"${LOGS_DIR}/reads/${cell}_${caller}.recall_strata${RECALL_SFX}.log" \
     || { rm -f "${jobs}"; die "read recall failed for ${cell} ${caller}, see ${LOGS_DIR}/reads/${cell}_${caller}.recall_strata${RECALL_SFX}.log"; }
@@ -150,9 +178,9 @@ recall_one() {
 PHASER_LIST="${PHASERS[*]}"
 export -f recall_one bam_key vcf_name newer_than phaser_applies stratum_bed log warn die
 export METRICS_DIR METRICS_READS_DIR PHASE_DIR READS_DIR LOGS_DIR TMP_DIR REFERENCE_NAME \
-       REGION_NAME SAMPLE TRUTH_PHASED STRATA_ARGS READACC_MIN_SNPS READ_RECALL_MIN_SNPS READ_RECALL_FRACTION READ_RECALL_COMMON READ_TRUTH REGION_REF RECALL_SFX PREPARED_DIR PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
+       REGION_NAME SAMPLE TRUTH_PHASED STRATA_ARGS OTHER_STRATA_ARGS OTHER_REF READACC_MIN_SNPS READ_RECALL_MIN_SNPS READ_RECALL_FRACTION READ_RECALL_COMMON READ_TRUTH REGION_REF RECALL_SFX PREPARED_DIR PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
 
-log "${SAMPLE} ${REFERENCE_NAME}: read recall per region, ${READ_TRUTH} labels, ${REGION_REF} reads and regions, reads with >= ${READ_RECALL_MIN_SNPS} truth het SNPs (${RECALL_SFX:-default} files), for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}"
+log "${SAMPLE} ${REFERENCE_NAME}: read recall per region, ${READ_TRUTH} labels, ${REGION_REF} reads and regions${OTHER_REF:+ checked on ${OTHER_REF} too}, reads with >= ${READ_RECALL_MIN_SNPS} truth het SNPs (${RECALL_SFX:-default} files), for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}"
 "${PARALLEL}" -j "${RECALL_JOBS}" recall_one {1} {2} {3} \
     ::: "${CALLERS[@]}" ::: "${PLATFORMS[@]}" ::: "${DEPTHS[@]}" || true
 

@@ -35,6 +35,15 @@ both, every run is scored against the same reads, labels and regions.
 read table too (the cell on each reference), in case downsampling kept a few
 reads on one reference only.
 
+Assessable on both references (--other-reads-table, --other-truth-alleles,
+--other-stratum): the read table, allele matrix and strata of the other
+reference too, and a read counts only where it would count on both - the truth
+het SNPs (--min-read-snps) on each reference's truth, and a region only if it
+lies in it (--stratum-fraction) by its alignment on each reference, each
+reference's own BED. The same reads, checked from both sides, so neither
+reference's truth or confident regions decide alone. --eligible-out writes per
+region the reads that would count on this reference, on the other and on both.
+
 Block orientation (--orient): the label H1/H2 of a block is arbitrary, so it is
 matched to the truth first.
   snps   (default) majority of the block's SNPs against the truth VCF of the
@@ -111,8 +120,17 @@ def main():
                          "(0.5; 0 = any overlap)")
     ap.add_argument("--require-reads", action="append", default=[],
                     help="read table; keep only reads in it, repeatable")
+    ap.add_argument("--other-reads-table", default=None,
+                    help="the other reference's read table: count a read only where it counts on both")
+    ap.add_argument("--other-truth-alleles", default=None, help="the other reference's truth allele matrix")
+    ap.add_argument("--other-stratum", action="append", default=[], help="name=bed of the other reference")
+    ap.add_argument("--eligible-out", default=None,
+                    help="with --other-*: per region, reads that count on this reference, the other, both")
     ap.add_argument("--jobs", required=True)
     args = ap.parse_args()
+    both_refs = args.other_reads_table is not None
+    if both_refs != (args.other_truth_alleles is not None):
+        sys.exit("--other-reads-table and --other-truth-alleles go together")
 
     orient = args.orient
     if args.truth_source == "truthtags":
@@ -127,16 +145,54 @@ def main():
             fh.readline()
             names = {line.split("\t", 1)[0] for line in fh}
         keep = names if keep is None else keep & names
-    strata = []
-    for item in args.stratum:
-        name, _, path = item.partition("=")
-        if os.path.exists(path):
-            strata.append((name, IntervalSet.from_bed(path, autosomes_only=True)))
-    # every region in one set: a read outside it is in no region, and with
-    # hundreds of regions (one per gene) that check saves testing each of them
-    union = IntervalSet([(c, s, e) for _, iv in strata for c in iv.starts
-                         for s, e in zip(iv.starts[c], iv.ends[c])])
+    def load_strata(items):
+        out = []
+        for item in items:
+            name, _, path = item.partition("=")
+            if os.path.exists(path):
+                out.append((name, IntervalSet.from_bed(path, autosomes_only=True)))
+        return out
+
+    def union_of(strata_):
+        # every region in one set: a read outside it is in no region, and with
+        # hundreds of regions (one per gene) that check saves testing each of them
+        return IntervalSet([(c, s, e) for _, iv in strata_ for c in iv.starts
+                            for s, e in zip(iv.starts[c], iv.ends[c])])
+
     frac = args.stratum_fraction
+
+    def regions_at(c, s, e, strata_, union_):
+        """the regions holding --stratum-fraction of the alignment c:s-e or more"""
+        span = max(1, e - s)
+        found = ()
+        if union_.overlap(c, s, e) > 0:
+            for n, iv in strata_:
+                ov = iv.overlap(c, s, e)
+                if ov > 0 and ov >= frac * span:
+                    found += (n,)
+        return found
+
+    strata = load_strata(args.stratum)
+    other_pos, other_snps, other_strata = None, None, []
+    if both_refs:
+        other_strata = load_strata(args.other_stratum)
+        # a region exists on both references or it is left out
+        named = {n for n, _ in other_strata}
+        strata = [(n, iv) for n, iv in strata if n in named]
+        other_strata = [(n, iv) for n, iv in other_strata if n in {m for m, _ in strata}]
+        other_snps = snps_per_read(args.other_truth_alleles)
+        other_pos = {}
+        with open_text(args.other_reads_table) as fh:
+            h = fh.readline().rstrip("\n").split("\t")
+            ic, i_s, ie = h.index("chrom"), h.index("start"), h.index("end")
+            for line in fh:
+                f = line.rstrip("\n").split("\t")
+                if f[0] in truth and is_autosome(f[ic]):
+                    other_pos[f[0]] = (f[ic], int(f[i_s]), int(f[ie]))
+    union = union_of(strata)
+    other_union = union_of(other_strata)
+    # with --other-*: per region, reads that count on this reference, on the other, on both
+    eligible = {n: [0, 0, 0] for n in ["genome"] + [m for m, _ in strata]}
     # the regions and length of every truth-tagged read with enough truth SNPs,
     # from its primary alignment; a read missing from the read table or the
     # allele matrix is left out
@@ -150,22 +206,43 @@ def main():
             if r not in truth or not is_autosome(f[ic]) or (keep is not None and r not in keep):
                 continue
             autosomal.add(r)
-            if snps.get(r, 0) < args.min_read_snps:
-                continue
             c, s, e = f[ic], int(f[i_s]), int(f[ie])
-            span = max(1, e - s)
-            regions = ("genome",)
-            if union.overlap(c, s, e) > 0:
-                for n, iv in strata:
-                    ov = iv.overlap(c, s, e)
-                    if ov > 0 and ov >= frac * span:
-                        regions += (n,)
-            region_of[r] = regions
-            length_of[r] = int(f[il])
-    print("%s: %s labels, %d reads labelled on chr1-22, %d with >= %d truth het SNPs; blocks oriented by %s"
-          % (args.reads_table, args.truth_source, len(autosomal), len(region_of), args.min_read_snps, orient),
+            if not both_refs:
+                if snps.get(r, 0) < args.min_read_snps:
+                    continue
+                region_of[r] = ("genome",) + regions_at(c, s, e, strata, union)
+                length_of[r] = int(f[il])
+                continue
+            here = snps.get(r, 0) >= args.min_read_snps
+            o = other_pos.get(r)
+            there = o is not None and other_snps.get(r, 0) >= args.min_read_snps
+            if not (here or there):
+                continue
+            mine = ("genome",) + regions_at(c, s, e, strata, union) if here else ()
+            theirs = ("genome",) + regions_at(o[0], o[1], o[2], other_strata, other_union) if there else ()
+            for n in set(mine) | set(theirs):
+                k = eligible[n]
+                k[0] += n in mine
+                k[1] += n in theirs
+                k[2] += n in mine and n in theirs
+            if here and there:
+                region_of[r] = tuple(n for n in mine if n in theirs)
+                length_of[r] = int(f[il])
+    print("%s: %s labels, %d reads labelled on chr1-22, %d with >= %d truth het SNPs%s; blocks oriented by %s"
+          % (args.reads_table, args.truth_source, len(autosomal), len(region_of), args.min_read_snps,
+             " on both references" if both_refs else "", orient),
           file=sys.stderr)
-    del snps, keep
+    if both_refs:
+        g = eligible["genome"]
+        print("  counted on this reference %d, on the other %d, on both %d" % tuple(g), file=sys.stderr)
+        if args.eligible_out:
+            tmp = "%s.%d.tmp" % (args.eligible_out, os.getpid())
+            with open(tmp, "w") as fh:
+                fh.write("stratum\tthis_reference\tother_reference\tboth\n")
+                for n in ["genome"] + [m for m, _ in strata]:
+                    fh.write("%s\t%d\t%d\t%d\n" % ((n,) + tuple(eligible[n])))
+            os.replace(tmp, args.eligible_out)
+    del snps, keep, other_snps, other_pos
 
     # parental labels oriented by SNPs: the blocks are matched to the truth VCF,
     # so PAT/MAT must be put on its haplotypes first - on each chromosome of the

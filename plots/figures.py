@@ -34,7 +34,7 @@ from matplotlib.ticker import (FixedLocator, Formatter, FuncFormatter, LogLocato
                                NullLocator)
 
 import style as st
-from data import NAN, READ_TRUTH, ratio
+from data import NAN, READ_TRUTH, TRUTH_SFX, ratio
 
 
 class NoData(Exception):
@@ -372,12 +372,12 @@ def figS4(db, ctx, ref):
 
 
 def fig7b(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig7b_read_precision_matpat_" + ref, ref,
+    return coverage_lines(db, ctx, "fig7b_read_precision" + TRUTH_SFX + "_" + ref, ref,
                           matpat_precision_pct, "Read haplotagging precision (%)", "platform")
 
 
 def fig7c(db, ctx, ref):
-    return coverage_lines(db, ctx, "fig7c_read_recall_matpat_" + ref, ref,
+    return coverage_lines(db, ctx, "fig7c_read_recall" + TRUTH_SFX + "_" + ref, ref,
                           matpat_recall_pct, "Read haplotagging recall (%)", "platform")
 
 
@@ -784,7 +784,7 @@ def figS2b(db, ctx, ref):
 
 
 def figS2c(db, ctx, ref):
-    return grid_heatmap(db, ctx, ref, "figS2c_reads_lost_all_callers_matpat", reads_lost_pct,
+    return grid_heatmap(db, ctx, ref, "figS2c_reads_lost_all_callers" + TRUTH_SFX, reads_lost_pct,
                         "Labelled reads not tagged to\ntheir parental haplotype (%)")
 
 
@@ -898,6 +898,7 @@ STRATUM_LABEL = {
     "satellites_slop5": "Satellites",
     "MHC": "MHC",
     "chrX_nonPAR": "chrX non-PAR",
+    "CMRG": "CMRG genes",
 }
 
 
@@ -1629,7 +1630,7 @@ def fig6d(db, ctx):
     if not recall:
         raise NoData("no metrics_reads/summary_recall_strata_%s.tsv - run READ_TRUTH=%s "
                      "bash bin/read_recall_strata.sh on both references" % (READ_TRUTH, READ_TRUTH))
-    return reference_files(db, ctx, "fig6d_reference_read_recall_matpat",
+    return reference_files(db, ctx, "fig6d_reference_read_recall" + TRUTH_SFX,
                            lambda db, key: recall.get(key, NAN),
                            "Read haplotagging recall (%)", "read haplotagging recall",
                            limits="from_0.99")
@@ -1696,7 +1697,7 @@ def fig6e(db, ctx):
                      labelspacing=0.25)
     paper_title(fig, "Read haplotagging recall on %s against %s"
                 % (st.REFERENCE_LABEL[b], st.REFERENCE_LABEL[a]))
-    return save(fig, ctx, "fig6e_reference_read_recall_matpat_by_platform")
+    return save(fig, ctx, "fig6e_reference_read_recall" + TRUTH_SFX + "_by_platform")
 
 
 # (id, function, drawn once per reference?)

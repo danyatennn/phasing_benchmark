@@ -39,9 +39,9 @@ from matplotlib.ticker import FixedLocator, NullLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes
-from data import NAN, ratio
+from data import NAN, TRUTH_SFX, ratio
 from figures import (NoData, SameDecimals, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks,
-                     panel_row, panel_size, paper_title,
+                     matpat_recall, panel_row, panel_size, paper_title,
                      platform_groups, platform_phaser_rows,
                      phaser_axis, phaser_handles, platform_handles, positive, save,
                      short_number, strata_heatmap, stratum_label, top_legend, y_grid)
@@ -605,6 +605,27 @@ SAMPLE_COLOR = {
     "HG001": "#7A7A7A",
 }
 SAMPLE_SHADES = ["#2C3A4B", "#6D7F92", "#B9C4CF", "#8C8C8C", "#D4D4D4"]
+# the name a sample folder is shown under: samples/HG005r2 is HG005 with its
+# truth phased by the HPRC release 2 trio assemblies and consensus read labels
+SAMPLE_LABEL = {"HG005r2": "HG005"}
+
+
+def sample_label(sample):
+    return SAMPLE_LABEL.get(sample, sample)
+
+
+# fig9c: reads against the parental labels of READ_TRUTH, each sample's own
+# reads and reference (READ_RECALL_COMMON=0 bin/read_recall_strata.sh, the
+# _own files): another sample has no T2T-CHM13 run to share reads with
+_own_recall = {}
+
+
+def labels_missed(db, ref, platform, depth, phaser):
+    """labelled reads not tagged to their parental haplotype (%), truth input"""
+    if db.sample_root not in _own_recall:
+        _own_recall[db.sample_root] = matpat_recall(db, TRUTH_SFX + "_own")
+    v = _own_recall[db.sample_root].get((ref, "truth", platform, depth, phaser), NAN)
+    return 100 - v if finite(v) else NAN
 
 
 def phaser_value(column, scale, complement=False):
@@ -620,15 +641,19 @@ def caller_value(column, scale):
 
 
 SAMPLE_METRICS = [
-    ("fig9a_samples_switch_rate", phaser_value("switch_rate", 100), "Switch error rate (%)", True, "phaser"),
-    ("fig9b_samples_block_ng50", phaser_value("block_ng50", 1e-6), "Phase block NG50 (Mb)", True, "phaser"),
-    ("fig9c_samples_reads_missed", phaser_value("read_recall", 100, complement=True),
-     "Truth-tagged reads not tagged\nto their haplotype (%)", False, "phaser"),
-    ("fig9d_samples_caller_fnr", caller_value("fnr", 100), "Truth het SNPs missed (FNR, %)", True, "caller"),
+    ("fig9a_samples_switch_rate", phaser_value("switch_rate", 100), "Switch error rate (%)", True, "phaser",
+     "Comparison of switch error rates across GIAB samples on GRCh38"),
+    ("fig9b_samples_block_ng50", phaser_value("block_ng50", 1e-6), "Phase block NG50 (Mb)", True, "phaser",
+     "Comparison of phase-block NG50 across GIAB samples on GRCh38"),
+    ("fig9c_samples_reads_missed" + TRUTH_SFX, lambda *a: labels_missed(*a),
+     "Labelled reads not tagged to\ntheir parental haplotype (%)", False, "phaser",
+     "Comparison of reads not haplotagged to their parental haplotype across GIAB samples on GRCh38"),
+    ("fig9d_samples_caller_fnr", caller_value("fnr", 100), "Truth het SNPs missed (FNR, %)", True, "caller",
+     "Comparison of missed heterozygous SNPs across GIAB samples on GRCh38"),
 ]
 
 
-def samples_figure(dbs, ctx, name, value, ylabel, log, by, depth=30, ref="GRCh38"):
+def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30, ref="GRCh38"):
     """The GIAB samples side by side at 30x on GRCh38: a panel per platform that
     two samples or more were sequenced on, a group per phaser on the truth
     input (or per caller), a bar per sample. Each sample is scored against its
@@ -643,12 +668,15 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, depth=30, ref="GRCh38
     has = lambda sample, platform: any(finite(val(sample, platform, s)) for s in series_all)
     order = list(SAMPLE_COLOR)
     samples = sorted((s for s in dbs if any(has(s, p) for p in st.PLATFORMS)),
-                     key=lambda s: (order.index(s) if s in order else len(order), s))
+                     key=lambda s: (order.index(sample_label(s)) if sample_label(s) in order else len(order), s))
+    shown = [sample_label(s) for s in samples]
+    if len(set(shown)) < len(shown):
+        raise NoData("two sample folders shown as one name (%s) - pick one with --samples" % " ".join(samples))
     platforms = [p for p in st.PLATFORMS if sum(has(s, p) for s in samples) >= 2]
     if not platforms:
         raise NoData("no platform with two samples at %dx" % depth)
     others = iter(SAMPLE_SHADES * len(samples))
-    color = {s: SAMPLE_COLOR[s] if s in SAMPLE_COLOR else next(others) for s in samples}
+    color = {s: SAMPLE_COLOR[sample_label(s)] if sample_label(s) in SAMPLE_COLOR else next(others) for s in samples}
     fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 12)
     xs, w = offsets(len(samples))
     drawn = []
@@ -666,15 +694,16 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, depth=30, ref="GRCh38
         plt.close(fig)
         raise NoData("no values for any sample at %dx" % depth)
     scale_axes(axes, drawn, log, "%s, %d×" % (ylabel, depth))
-    top_legend(legend_ax, [Patch(color=color[s], label=s) for s in samples])
+    top_legend(legend_ax, [Patch(color=color[s], label=sample_label(s)) for s in samples])
+    paper_title(fig, title)
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
 
 
 def sample_figures(dbs, ctx):
     out = []
-    for name, value, ylabel, log, by in SAMPLE_METRICS:
+    for name, value, ylabel, log, by, title in SAMPLE_METRICS:
         try:
-            out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by))
+            out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by, title))
         except NoData:
             pass
         finally:
@@ -830,12 +859,12 @@ def fig12c(db, ctx):
 
 
 def fig12d(db, ctx):
-    return reference_strata(db, ctx, "fig12d_reference_strata_wrong_haplotype_matpat", stratum_wrong_matpat,
+    return reference_strata(db, ctx, "fig12d_reference_strata_wrong_haplotype" + TRUTH_SFX, stratum_wrong_matpat,
                             "Tagged reads on the wrong parental haplotype")
 
 
 def fig12e(db, ctx):
-    return reference_strata(db, ctx, "fig12e_reference_strata_missed_matpat", stratum_missed_matpat,
+    return reference_strata(db, ctx, "fig12e_reference_strata_missed" + TRUTH_SFX, stratum_missed_matpat,
                             "Labelled reads not tagged to their parental haplotype")
 
 

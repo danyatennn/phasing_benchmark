@@ -38,6 +38,14 @@ NAN = float("nan")
 # READ_TRUTH=kmer python plots/make_plots.py --out <a folder of its own>: the
 # file names keep _matpat
 READ_TRUTH = os.environ.get("READ_TRUTH", "matpat")
+# the part of a file name that says which labels the read figures use
+TRUTH_SFX = "_" + READ_TRUTH
+
+# a gene set beside the GIAB strata, HG002 only (bin/genes_run.sh): its rows are
+# written as the strata's are, under metrics_genes/<set>/conf (genes cut to the
+# confident regions), the set itself as the stratum <set>
+GENE_SET = "CMRG"
+GENE_SET_DIR = os.path.join("metrics_genes", GENE_SET, "conf")
 
 ROW_COLUMNS = [
     "reference", "region", "caller", "platform", "depth", "phaser",
@@ -167,6 +175,9 @@ class Metrics:
         self.metrics_dir = os.path.join(self.sample_root, "metrics")
         self.reads_dir = os.path.join(self.sample_root, "metrics_reads")
         self.strata_dir = os.path.join(self.sample_root, "metrics_strata_auto")
+        # the gene set's strata and reads (HG002 only), "" when there are none
+        genes = os.path.join(root, GENE_SET_DIR)
+        self.genes_dir = genes if sample == "HG002" and os.path.isdir(os.path.join(genes, "strata")) else ""
         self.sample = sample
         self.region = region
         self.rules = readacc_rules
@@ -257,7 +268,14 @@ class Metrics:
           precision = correct / compared (tagged in a block the truth orients)"""
         if self._matpat is None:
             self._matpat = {}
-            for r in _read_table(os.path.join(self.reads_dir, "summary_recall_strata_%s.tsv" % READ_TRUTH)):
+            name = "summary_recall_strata_%s.tsv" % READ_TRUTH
+            rows = _read_table(os.path.join(self.reads_dir, name))
+            if self.genes_dir:
+                # the gene set as a whole, counted as the strata are (same reads, >= 2
+                # truth het SNPs, half of a read inside)
+                rows += [r for r in _read_table(os.path.join(self.genes_dir, "reads", name))
+                         if r.get("stratum") == GENE_SET]
+            for r in rows:
                 try:
                     k = (r["reference"], r["caller"], r["platform"], int(float(r["depth"])),
                          r["phaser"], r["stratum"])
@@ -340,15 +358,16 @@ class Metrics:
         for line in _read_table(os.path.join(self.root, "regions", "strata.tsv")):
             if line.get("tier") == "1" and line.get("stratum"):
                 listed.add(line["stratum"])
-        if not listed:
-            return list(TIER1_STRATA)
-        return [s for s in TIER1_STRATA if s in listed] + sorted(listed - set(TIER1_STRATA))
+        names = list(TIER1_STRATA) if not listed else \
+            [s for s in TIER1_STRATA if s in listed] + sorted(listed - set(TIER1_STRATA))
+        return names + [GENE_SET] if self.genes_dir else names
 
     def stratum(self, key, stratum):
         cache_key = key + (stratum,)
         if cache_key not in self._strata:
-            path = os.path.join(
-                self.strata_dir, "phase_%s__%s.row.tsv" % (self.name(*key), stratum))
+            where = os.path.join(self.genes_dir, "strata") if stratum == GENE_SET and self.genes_dir \
+                else self.strata_dir
+            path = os.path.join(where, "phase_%s__%s.row.tsv" % (self.name(*key), stratum))
             row = None if _exists(path + ".lock") else _read_row(path, STRATA_COLUMNS)
             if row is not None and row["stratum"] != stratum:
                 row = None
