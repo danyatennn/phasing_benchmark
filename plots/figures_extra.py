@@ -23,8 +23,8 @@ nothing to show raises NoData.
           switch rate, phase block ends, reads tagged, reads on the wrong
           haplotype, labelled reads not tagged to their haplotype (the ratio
           of the two)
-  fig9a-d the GIAB samples side by side at 30x, bars: switch rate, NG50,
-          truth-tagged reads missed, FNR
+  fig9a-e the GIAB samples side by side at 30x, bars: switch rate, NG50,
+          labelled reads missed, FNR, read haplotagging recall
 """
 
 import math
@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FixedLocator, NullLocator
+from matplotlib.ticker import FixedLocator, MaxNLocator, NullLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes
@@ -628,6 +628,12 @@ def labels_missed(db, ref, platform, depth, phaser):
     return 100 - v if finite(v) else NAN
 
 
+def labels_recall(db, ref, platform, depth, phaser):
+    """read haplotagging recall (%): labelled reads tagged to their parental haplotype, truth input"""
+    v = labels_missed(db, ref, platform, depth, phaser)
+    return 100 - v if finite(v) else NAN
+
+
 def phaser_value(column, scale, complement=False):
     """value(db, ref, platform, depth, phaser) of the truth-input run"""
     def value(db, ref, platform, depth, phaser):
@@ -648,6 +654,9 @@ SAMPLE_METRICS = [
     ("fig9c_samples_reads_missed" + TRUTH_SFX, lambda *a: labels_missed(*a),
      "Labelled reads not tagged to\ntheir parental haplotype (%)", False, "phaser",
      "Comparison of reads not haplotagged to their parental haplotype across GIAB samples on GRCh38"),
+    ("fig9e_samples_read_recall" + TRUTH_SFX, lambda *a: labels_recall(*a),
+     "Read haplotagging recall (%)", False, "phaser",
+     "Comparison of read haplotagging recall across GIAB samples on GRCh38"),
     ("fig9d_samples_caller_fnr", caller_value("fnr", 100), "Truth het SNPs missed (FNR, %)", True, "caller",
      "Comparison of missed heterozygous SNPs across GIAB samples on GRCh38"),
 ]
@@ -694,6 +703,13 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         plt.close(fig)
         raise NoData("no values for any sample at %dx" % depth)
     scale_axes(axes, drawn, log, "%s, %d×" % (ylabel, depth))
+    if "read_recall" in name:
+        # zoomed on the bars so the differences show, as the recall panels of A-C; no tick over 100%
+        lo, hi = min(drawn), max(drawn)
+        span = max(hi - lo, 1.0)
+        bottom, top = max(0.0, lo - 0.15 * span), hi + 0.35 * span
+        axes[0].set_ylim(bottom, top)
+        axes[0].set_yticks([v for v in MaxNLocator(5).tick_values(bottom, min(top, 100)) if bottom <= v <= 100])
     top_legend(legend_ax, [Patch(color=color[s], label=sample_label(s)) for s in samples])
     paper_title(fig, title)
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
