@@ -5,7 +5,7 @@
 #            of our 30x T2T-CHM13 v2.0 BAMs aligned again to T2T-CHM13 v1.0
 #            (the same reads, minimap2 and presets as for v2.0)
 # Phaser input, CMRG_INPUT (het SNPs of chr1-22, phase removed, no confident BED):
-#   cmrg   (default) the CMRG VCF itself, on both references alike
+#   cmrg   (default) the CMRG VCF itself inside the CMRG BED, on both references alike
 #   truth  GRCh38: GIAB v5.0q, all of it; CHM13v1: v5.0q has no v1.0 release,
 #          so the Q100 assembly (what v5.0q is built from) by dipcall against
 #          v1.0, inside dip.bed
@@ -106,8 +106,11 @@ truth)
   w="${D}/truth/work"
   mkdir -p "${w}"
   if [[ "${CMRG_INPUT}" == cmrg ]]; then
-    log "${CMRG_REF}: het SNPs of $(basename "${CVCF}"), chr1-22"
-    "${BCFTOOLS}" view -t "$(printf 'chr%s,' {1..22} | sed 's/,$//')" -m2 -M2 -v snps -g het "${CVCF}" \
+    # inside the CMRG BED: the v1.0 draft VCF covers the whole genome, the
+    # GRCh38 one the CMRG regions only, so both are cut to the benchmark BED
+    log "${CMRG_REF}: het SNPs of $(basename "${CVCF}") inside $(basename "${CBED}"), chr1-22"
+    grep -E "${AUTO_RE}" "${CBED}" >"${w}/cmrg.auto.bed"
+    "${BCFTOOLS}" view -T "${w}/cmrg.auto.bed" -m2 -M2 -v snps -g het "${CVCF}" \
       | "${BCFTOOLS}" annotate -x 'INFO,^FORMAT/GT' -Oz -o "${w}/raw.vcf.gz"
   elif [[ "${CMRG_REF}" == GRCh38 ]]; then
     log "GRCh38: phased het SNPs of $(basename "${TRUTH_SRC_VCF}"), chr1-22, no BED"

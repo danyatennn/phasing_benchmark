@@ -24,6 +24,8 @@
 #   bash bin/runtime_run.sh                             GRCh38
 #   REFERENCE_NAME=T2T bash bin/runtime_run.sh
 #   PHASING_CALLERS=truth PHASING_PHASERS="whatshap longphase" bash bin/runtime_run.sh
+#   RUNTIME_CHROM=chr20 REFERENCE_NAME=T2T PHASE_THREADS=1 bash bin/runtime_run.sh
+#                                                       one chromosome -> runtime_30x_T2T_chr20.tsv
 #
 # Heatmaps: python plots/figures_runtime.py
 
@@ -55,7 +57,32 @@ export PHASE_DIR VCF_DIR LOGS_DIR DATA_DIR REF SAMPLE REFERENCE_NAME REGION_NAME
        TRUTH_UNPHASED TRUTH_INDEL_UNPHASED TRUTH_ALL_UNPHASED WHATSHAP LONGPHASE MARGIN MARGIN_PARAMS_DIR HAPCUT2_BIN HIPHASE \
        BCFTOOLS BGZIP TABIX PHASE_THREADS TMP_DIR WHATSHAP_DOWNSAMPLING MARGIN_DEPTH
 
-table="${RUNTIME_DIR}/runtime_30x_${REFERENCE_NAME}.tsv"
+# RUNTIME_CHROM=chr20: one chromosome only. The cell's BAM and the phaser
+# input are cut to it first (not timed), and every phaser reads those two.
+if [[ -n "${RUNTIME_CHROM:-}" ]]; then
+  CUT_DIR="${RUNTIME_DIR}/input"
+  mkdir -p "${CUT_DIR}"
+  for platform in "${PLATFORMS[@]}"; do
+    cut="${CUT_DIR}/$(bam_key "${platform}" "${REFERENCE_NAME}" "${RUNTIME_DEPTH}").bam"
+    [[ -s "${cut}.bai" ]] || { "${SAMTOOLS}" view -b -o "${cut}" "$(sub_bam "${platform}" "${REFERENCE_NAME}" "${RUNTIME_DEPTH}")" "${RUNTIME_CHROM}" \
+                                && "${SAMTOOLS}" index "${cut}"; }
+    for caller in "${CALLERS[@]}"; do
+      [[ "${caller}" == truth ]] && continue
+      name="$(vcf_name "${platform}" "${RUNTIME_DEPTH}" "${caller}").het_snps.vcf.gz"
+      [[ -s "${CUT_DIR}/${name}.tbi" ]] || { "${BCFTOOLS}" view -r "${RUNTIME_CHROM}" -Oz -o "${CUT_DIR}/${name}" "${VCF_DIR}/${name}" \
+                                             && "${TABIX}" -f -p vcf "${CUT_DIR}/${name}"; }
+    done
+  done
+  cut="${CUT_DIR}/truth.het_snps.unphased.vcf.gz"
+  [[ -s "${cut}.tbi" ]] || { "${BCFTOOLS}" view -r "${RUNTIME_CHROM}" -Oz -o "${cut}" "${TRUTH_UNPHASED}" && "${TABIX}" -f -p vcf "${cut}"; }
+  TRUTH_UNPHASED="${cut}"
+  VCF_DIR="${CUT_DIR}"
+  sub_bam() { printf '%s/%s.bam\n' "${CUT_DIR}" "$(bam_key "$1" "$2" "$3")"; }
+  export -f sub_bam
+  export TRUTH_UNPHASED VCF_DIR CUT_DIR
+fi
+
+table="${RUNTIME_DIR}/runtime_30x_${REFERENCE_NAME}${RUNTIME_CHROM:+_${RUNTIME_CHROM}}.tsv"
 [[ -s "${table}" ]] || printf 'reference\tplatform\tdepth\tcaller\tphaser\tthreads\twall_s\tuser_s\tsys_s\tmax_rss_mb\texit\thost\tload1\tdate\n' >"${table}"
 
 # time_value <GNU time -v output> <label> - the value after "label: "
