@@ -614,23 +614,30 @@ def sample_label(sample):
     return SAMPLE_LABEL.get(sample, sample)
 
 
-# fig9c: reads against the parental labels of READ_TRUTH, each sample's own
-# reads and reference (READ_RECALL_COMMON=0 bin/read_recall_strata.sh, the
-# _own files): another sample has no T2T-CHM13 run to share reads with
+# fig9c, fig9e: reads against the labels each sample has - the parental labels
+# of READ_TRUTH, each sample's own reads and reference (READ_RECALL_COMMON=0
+# bin/read_recall_strata.sh, the _own files), and where it has none (HG001: no
+# trio, no Q100) the reads against whatshap haplotag with its phased truth VCF,
+# blocks oriented by their SNPs (read_recall of readacc_run.sh), as in Table 2
 _own_recall = {}
-
-
-def labels_missed(db, ref, platform, depth, phaser):
-    """labelled reads not tagged to their parental haplotype (%), truth input"""
-    if db.sample_root not in _own_recall:
-        _own_recall[db.sample_root] = matpat_recall(db, TRUTH_SFX + "_own")
-    v = _own_recall[db.sample_root].get((ref, "truth", platform, depth, phaser), NAN)
-    return 100 - v if finite(v) else NAN
+_no_labels = set()     # sample roots drawn from the truth VCF's haplotags, marked with a dagger
 
 
 def labels_recall(db, ref, platform, depth, phaser):
-    """read haplotagging recall (%): labelled reads tagged to their parental haplotype, truth input"""
-    v = labels_missed(db, ref, platform, depth, phaser)
+    """read haplotagging recall (%), truth input"""
+    if db.sample_root not in _own_recall:
+        _own_recall[db.sample_root] = matpat_recall(db, TRUTH_SFX + "_own")
+    v = _own_recall[db.sample_root].get((ref, "truth", platform, depth, phaser), NAN)
+    if not finite(v):
+        v = 100 * db.get((ref, "truth", platform, depth, phaser), "read_recall")
+        if finite(v):
+            _no_labels.add(db.sample_root)
+    return v
+
+
+def labels_missed(db, ref, platform, depth, phaser):
+    """labelled reads not tagged to their haplotype (%), truth input"""
+    v = labels_recall(db, ref, platform, depth, phaser)
     return 100 - v if finite(v) else NAN
 
 
@@ -652,8 +659,8 @@ SAMPLE_METRICS = [
     ("fig9b_samples_block_ng50", phaser_value("block_ng50", 1e-6), "Phase block NG50 (Mb)", True, "phaser",
      "Comparison of phase-block NG50 across GIAB samples on GRCh38"),
     ("fig9c_samples_reads_missed" + TRUTH_SFX, lambda *a: labels_missed(*a),
-     "Labelled reads not tagged to\ntheir parental haplotype (%)", False, "phaser",
-     "Comparison of reads not haplotagged to their parental haplotype across GIAB samples on GRCh38"),
+     "Reads not tagged to\ntheir haplotype (%)", False, "phaser",
+     "Comparison of reads not haplotagged to their haplotype across GIAB samples on GRCh38"),
     ("fig9e_samples_read_recall" + TRUTH_SFX, lambda *a: labels_recall(*a),
      "Read haplotagging recall (%)", False, "phaser",
      "Comparison of read haplotagging recall across GIAB samples on GRCh38"),
@@ -669,6 +676,7 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
     own truth (HG002 v5.0q, HG005 v4.2.1, HG001 Platinum Pedigree v1.2), so a
     difference is the sample and its truth together."""
     series_all = st.PHASERS if by == "phaser" else [c for c in st.CALLERS if c != "truth"]
+    _no_labels.clear()
 
     def val(sample, platform, s):
         v = value(dbs[sample], ref, platform, depth, s)
@@ -710,7 +718,11 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         bottom, top = max(0.0, lo - 0.15 * span), hi + 0.35 * span
         axes[0].set_ylim(bottom, top)
         axes[0].set_yticks([v for v in MaxNLocator(5).tick_values(bottom, min(top, 100)) if bottom <= v <= 100])
-    top_legend(legend_ax, [Patch(color=color[s], label=sample_label(s)) for s in samples])
+    dagger = {s for s in samples if dbs[s].sample_root in _no_labels}
+    top_legend(legend_ax, [Patch(color=color[s], label=sample_label(s) + ("$^\\dagger$" if s in dagger else ""))
+                           for s in samples],
+               title="$^\\dagger$reads against whatshap haplotag with the phased truth VCF (no parental labels)"
+               if dagger else None)
     paper_title(fig, title)
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
 
