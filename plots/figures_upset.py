@@ -134,7 +134,7 @@ def fig_crossref(ctx):
     combos = stay + away
     w, h = st.PAPER_PANELS["upset_crossref"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(3, len(DIRECTIONS), height_ratios=[2.2, 0.9, 0.2])
+    grid = fig.add_gridspec(2, len(DIRECTIONS), height_ratios=[2.2, 0.9])   # no legend: the brackets name the colours
     first_ax = None
     for i, (direction, title) in enumerate(DIRECTIONS):
         d = share.get(direction, {})
@@ -146,11 +146,6 @@ def fig_crossref(ctx):
         ax = draw_upset(fig, grid[0, i], grid[1, i], combos, values, ranges, colors, CROSS_SETS, CROSS_LABEL, CROSS_SET_COLOR,
                         groups, "Reads of the stratum (%)", show_sets=(i == 0), title=title, sharey=first_ax)
         first_ax = first_ax or ax
-    legend_ax = fig.add_subplot(grid[2, :])
-    legend_ax.axis("off")
-    legend_ax.legend(handles=[Patch(color=LIGHT, label="In the same stratum on the other reference"),
-                              Patch(color=DARK, label="Elsewhere on the other reference")],
-                     loc="center", ncol=2, borderaxespad=0, frameon=False)
     paper_title(fig, "Where the reads of %s land on the other reference, 30×"
                 % stratum_label(ctx.stratum).replace("\n", " ").lower())
     return save(fig, ctx, "figU1_crossref_%s_%s" % (ctx.stratum, ctx.reads))
@@ -210,7 +205,7 @@ def fig_labels(ctx):
     legend_ax.legend(handles=[Patch(facecolor="#9A9A9A", alpha=0.45, hatch="////", edgecolor="white",
                                     label="Labels disagree")],
                      loc="center", ncol=1, borderaxespad=0, frameon=False)
-    paper_title(fig, "Reads labelled by each parental labelling method, T2T-CHM13, 30×")
+    paper_title(fig, "Reads labelled by each parental method, T2T-CHM13, 30×")
     return save(fig, ctx, "figU2_read_labels")
 
 
