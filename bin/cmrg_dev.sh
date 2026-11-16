@@ -18,7 +18,7 @@
 #   CMRG_REF=CHM13v1 bash bin/cmrg_dev.sh truth            (minutes; CMRG_INPUT=truth on CHM13v1: dipcall, hours)
 #   CMRG_REF=GRCh38 CMRG_JOBS=6 bash bin/cmrg_dev.sh phase truth input, every platform x phaser
 #   CMRG_REF=GRCh38 bash bin/cmrg_dev.sh eval
-#   CMRG_REF=GRCh38 bash bin/cmrg_dev.sh tags              reads of the genes haplotagged (benchmark, every run)
+#   CMRG_REF=GRCh38 bash bin/cmrg_dev.sh tags              reads of the CMRG regions: SNPs covered, tags (benchmark, every run)
 #   bash bin/cmrg_dev.sh reads                             read recall, consensus labels, reads anchored on v1.0 (after tags on both)
 #
 # Written to cmrg_dev/<ref>/bam/ (CHM13v1) and cmrg_dev/<ref>/<input>/: truth/, phased/, logs/, eval/.
@@ -193,24 +193,27 @@ eval)
   ;;
 
 tags)
-  # the reads of the genes (primary alignments), haplotagged with the benchmark
-  # and with every run, for the read recall of the reads step
-  genes="${D}/eval/genes.bed"
-  require_file "${genes}" "gene BED (run the eval step)"
+  # the reads of the CMRG regions (primary alignments, chr1-22): where they
+  # align, the benchmark SNPs each covers with REF or ALT, and their tags by
+  # the benchmark and by every run - for the read recall of the reads step
+  require_file "${D}/eval/genes.bed" "gene BED (run the eval step)"
   R="${D}/reads"
   mkdir -p "${R}"
+  grep -E "${AUTO_RE}" "${CBED}" >"${R}/cmrg.auto.bed"
   for p in "${PLATFORMS[@]}"; do
     if [[ "${CMRG_REF}" == CHM13v1 ]]; then bam="${B}/${p}.bam"; else bam="$(sub_bam "${p}" GRCh38 "${DEPTH}")"; fi
     require_file "${bam}" "30x BAM of ${p}"
     if [[ ! -s "${R}/${p}.bam.bai" ]]; then
-      "${SAMTOOLS}" view -b -F 0x904 -M -L "${genes}" -o "${R}/${p}.bam" "${bam}"
+      "${SAMTOOLS}" view -b -F 0x904 -M -L "${R}/cmrg.auto.bed" -o "${R}/${p}.bam" "${bam}"
       "${SAMTOOLS}" index "${R}/${p}.bam"
     fi
     # name, chrom, start, end of each alignment (end from the CIGAR)
     "${SAMTOOLS}" view "${R}/${p}.bam" | awk -F'\t' -v OFS='\t' '{ n = 0; c = $6
         while (match(c, /[0-9]+[MDN=X]/)) { n += substr(c, RSTART, RLENGTH - 1); c = substr(c, RSTART + RLENGTH) }
         print $1, $3, $4 - 1, $4 - 1 + n }' >"${R}/${p}.aln.tsv"
-    log "${CMRG_REF} ${p}: $(wc -l <"${R}/${p}.aln.tsv") reads in the genes, haplotagging"
+    "${SAMTOOLS}" view "${R}/${p}.bam" | "${PLOTS_PYTHON}" "${PROJECT_ROOT}/plots/read_snp_count.py" \
+        --vcf "${TRUTH_P}" >"${R}/${p}.snps.tsv"
+    log "${CMRG_REF} ${p}: $(wc -l <"${R}/${p}.aln.tsv") reads in the CMRG regions, haplotagging"
     "${WHATSHAP}" haplotag --reference "${CREF}" --sample "${SAMPLE}" --ignore-read-groups --skip-missing-contigs \
         --output-haplotag-list "${R}/${p}.truth.tsv" -o /dev/null "${TRUTH_P}" "${R}/${p}.bam" >"${R}/${p}.truth.log" 2>&1
     for vcf in "${D}"/phased/"${p}"_*_truth_*.vcf.gz; do
@@ -233,8 +236,8 @@ reads)
     if [[ -s "${f}" && -s "${q}" ]]; then lab+=(--labels "${p}=${f}" --require "${p}=${q}"); else warn "${p}: no ${f} or ${q}"; fi
   done
   "${PLOTS_PYTHON}" "${PROJECT_ROOT}/plots/cmrg_reads.py" "${lab[@]}" \
-      --anchor "CHM13v1=${OUT}/CHM13v1/${CMRG_INPUT}" --other "GRCh38=${OUT}/GRCh38/${CMRG_INPUT}" \
-      --out "${OUT}/cmrg_reads_${CMRG_INPUT}"
+      --anchor "CHM13v1=${OUT}/CHM13v1/${CMRG_INPUT}" --anchor-bed "${CMRG_SRC}/HG002_CHM13v1.0_CMRG_smallvar_v1.00_draft.bed" \
+      --other "GRCh38=${OUT}/GRCh38/${CMRG_INPUT}" --out "${OUT}/cmrg_reads_${CMRG_INPUT}"
   ;;
 
 *) die "unknown step ${STEP}: ref, align, truth, phase, eval, tags or reads" ;;
