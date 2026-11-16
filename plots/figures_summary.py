@@ -49,7 +49,7 @@ import matplotlib.colors as matplotlib_colors
 
 import style as st
 from data import GENE_SET, GENE_SET_DIR, sample_root
-from figures import (NoData, SameDecimals, colorbar, heatmap, log_ticks, same_decimals, save, series_handle,
+from figures import (NoData, SameDecimals, colorbar, heatmap, log_ticks, paper_title, same_decimals, save, series_handle,
                      sig_number, stratum_label, top_legend, y_grid)
 
 
@@ -466,9 +466,60 @@ def fig_r7(ctx):
                                                      stratum_label(ctx.stratum).replace("\n", " ").lower(),
                                                      ctx.depth))
         made.append(save(fig, ctx, "figR7_difficult_drop_%s" % phaser))
+        if phaser == "whatshap" and "T2T" in refs:
+            made.append(r7_small(ctx, phaser, "T2T", start, end))
     if not made:
         raise NoData("no phaser with both tables")
     return ", ".join(made)
+
+
+def r7_small(ctx, phaser, ref, start, end):
+    """R7 of one phaser on one reference, the size of Fig. 1c: an arrow per
+    platform from genome-wide (open) to the stratum (filled); the platform
+    colours are those of the legend of Fig. 1d, so only open/filled is told."""
+    w, h = st.PAPER_PANELS["r7_small"]
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.13])
+    ax = fig.add_subplot(grid[0, 0])
+    legend_ax = fig.add_subplot(grid[1, 0])
+    legend_ax.axis("off")
+    xs, ys = [], []
+    for p in st.PLATFORMS:
+        k = (ref, phaser, p)
+        if k not in start or k not in end:
+            continue
+        (x0, y0), (x1, y1) = start[k], end[k]
+        xs += [v for v in (x0, x1) if v == v and v > 0]
+        ys += [v for v in (y0, y1) if v == v]
+        c, m = st.PLATFORM_COLOR[p], st.PLATFORM_MARKER[p]
+        ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
+                    arrowprops=dict(arrowstyle="-|>", color=c, linestyle=(0, (3, 2)),
+                                    linewidth=0.8, shrinkA=3, shrinkB=3, mutation_scale=6))
+        ax.plot(x0, y0, marker=m, markersize=4.5, markerfacecolor="white", markeredgecolor=c,
+                markeredgewidth=1.0, linestyle="none", zorder=3)
+        ax.plot(x1, y1, marker=m, markersize=4.5, color=c, markeredgecolor="white", linestyle="none", zorder=3)
+    if not xs:
+        plt.close(fig)
+        raise NoData("no %s rows on %s" % (phaser, ref))
+    ax.set_xscale("log")
+    lo, hi = min(xs), max(xs)
+    ax.set_xlim(hi * 1.6, lo / 1.6)
+    log_ticks(ax.xaxis, lo / 1.6, hi * 1.6)
+    ylo, yhi = min(ys), max(ys)
+    pad = 0.08 * (yhi - ylo or 1)
+    ax.set_ylim(ylo - pad, min(100.5, yhi + pad))
+    ax.set_xlabel("Switch error rate (%, lower to the right)")
+    ax.set_ylabel("Truth het SNPs phased (%)")
+    ax.grid(color=st.GRID, linewidth=0.5)
+    ax.set_axisbelow(True)
+    top_legend(legend_ax, [Line2D([], [], marker="o", linestyle="none", markerfacecolor="white",
+                                  markeredgecolor=st.MUTED, markeredgewidth=1.0, label="Genome-wide"),
+                           Line2D([], [], marker="o", linestyle="none", color=st.MUTED, markeredgecolor="white",
+                                  label=stratum_label(ctx.stratum).replace("\n", " "))], ncol=2)
+    paper_title(fig, "%s: genome-wide to %s on %s" % (st.PHASER_LABEL[phaser],
+                                                      stratum_label(ctx.stratum).replace("\n", " ").lower(),
+                                                      st.REFERENCE_LABEL[ref]))
+    return save(fig, ctx, "figR7_difficult_drop_%s_%s_small" % (phaser, ref))
 
 
 # ------------------------------------------- R8: callers per genomic region

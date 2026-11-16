@@ -51,9 +51,10 @@ def change_text(new, old):
     return "×%.1f" % r if r >= 2 else "×%.2f" % r
 
 
-def label_bar(ax, x, value, width, text=None):
+def label_bar(ax, x, value, width, text=None, fontsize=None):
     """The value over a bar (under it when negative), upright on a wide bar and
-    turned on a narrow one; text replaces the plain value."""
+    turned on a narrow one; text replaces the plain value, fontsize the small
+    font (bars too close for it)."""
     if not finite(value):
         return
     text = text if text is not None else value_text(value)
@@ -61,7 +62,7 @@ def label_bar(ax, x, value, width, text=None):
     below = value < 0
     ax.annotate(text, (x, value), xytext=(0, -1.5 if below else 1.5), textcoords="offset points",
                 ha="center", va="top" if below else "bottom", rotation=0 if upright else 90,
-                fontsize=st.SMALL_FONT, color=st.INK, zorder=4, annotation_clip=False)
+                fontsize=fontsize or st.SMALL_FONT, color=st.INK, zorder=4, annotation_clip=False)
 
 
 def group_ticks(ax, labels):

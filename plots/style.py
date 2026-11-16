@@ -149,7 +149,11 @@ PAPER_PANELS = {
     "meth_side": (40, 130),                 # figB3_side, as high as A1 + A3
     # the assemblies against the phasers beside the chromosome figure of the
     # switch errors (assembly gaps)
-    "asm_side": (84, 120),                  # figC1_side: switch | NG50
+    "asm_side": (44, 72),                   # figC1_side: switch | NG50, beside the chromosome figure (126 mm)
+    # Fig. 2 (the page with the chromosome figure): b and c, side by side
+    "samples_paper": (83, 52),              # fig9a/fig9b of ONT 5 kHz, the three samples
+    # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
+    "r7_small": (60, 52),
     "experiment_meth": (PAGE_WIDTH, 50),         # figB1, figB3
     "experiment_meth_legend": (PAGE_WIDTH, 56),  # figB4, the legend under it
     "regions_profile": (84, 80),   # figR13a beside figR13b

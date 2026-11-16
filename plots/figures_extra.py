@@ -689,7 +689,7 @@ def plain_tick(v, _=None):
     return ("%.10f" % v).rstrip("0").rstrip(".") if v < 1 else "%g" % v
 
 
-def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30, ref="GRCh38"):
+def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30, ref="GRCh38", only=None, size=None):
     """The GIAB samples side by side at 30x on GRCh38: a panel per platform that
     two samples or more were sequenced on, a group per sample, a bar per phaser
     on the truth input (or per caller), its name and value written inside it.
@@ -710,7 +710,7 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
     shown = [sample_label(s) for s in samples]
     if len(set(shown)) < len(shown):
         raise NoData("two sample folders shown as one name (%s) - pick one with --samples" % " ".join(samples))
-    platforms = [p for p in st.PLATFORMS if sum(has(s, p) for s in samples) >= 2]
+    platforms = [p for p in st.PLATFORMS if sum(has(s, p) for s in samples) >= 2 and (not only or p in only)]
     if not platforms:
         raise NoData("no platform with two samples at %dx" % depth)
     bars = []                       # (ax, x, value, width, series)
@@ -719,7 +719,8 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
     if not drawn:
         raise NoData("no values for any sample at %dx" % depth)
     dagger = {s for s in samples if dbs[s].sample_root in _no_labels}
-    fig, note_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 20,
+    width, height = st.PAPER_PANELS[size] if size else (st.FULL_WIDTH, st.PANEL_HEIGHT + 20)
+    fig, note_ax, axes = panel_row(len(platforms), height=height, width=width,
                                    legend="bottom" if dagger else None)
     for ax, platform in zip(axes, platforms):
         series = [x for x in series_all if by != "phaser" or st.applies(platform, x)]
@@ -757,18 +758,26 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         note_ax.text(0.5, 0.5, "$^\\dagger$reads against whatshap haplotag with the phased truth VCF (no parental labels)",
                      ha="center", va="center", transform=note_ax.transAxes)
     paper_title(fig, title)
-    return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
+    return save(fig, ctx, "%s_%dx_%s%s" % (name, depth, ref, "_" + "_".join(only) if only else ""))
+
+
+# the panels of the paper: ONT 5 kHz alone, the one platform of all three samples
+SAMPLES_PAPER = ("fig9a_samples_switch_rate", "fig9b_samples_block_ng50")
 
 
 def sample_figures(dbs, ctx):
     out = []
     for name, value, ylabel, log, by, title in SAMPLE_METRICS:
-        try:
-            out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by, title))
-        except NoData:
-            pass
-        finally:
-            plt.close("all")
+        variants = [dict()]
+        if name in SAMPLES_PAPER:
+            variants.append(dict(only=("ont5k",), size="samples_paper"))
+        for extra in variants:
+            try:
+                out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by, title, **extra))
+            except NoData:
+                pass
+            finally:
+                plt.close("all")
     if not out:
         raise NoData("no sample has results at 30x")
     return ", ".join(out)

@@ -53,6 +53,7 @@ HG002 files carry the reference only; another sample's carry its name too
 """
 
 import argparse
+import math
 import os
 import sys
 
@@ -60,7 +61,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
@@ -197,6 +198,10 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper
     size, with_legend, title = paper or (None, True, None)
     width, height = st.PAPER_PANELS[size] if size else (st.FULL_WIDTH, st.PANEL_HEIGHT + 14)
     fig, legend_ax, axes = group_panels(platforms, width, height, with_legend)
+    # the labels are turned: neighbouring bars closer than ~2.4 mm take a smaller font
+    n_bars = max(len(bars_of(platforms[0], phasers_on(platforms[0])[0])), 1)
+    bar_mm = 0.85 * width / sum(len(phasers_on(p)) for p in platforms) * 0.8 / n_bars
+    label_size = 4 if bar_mm < 2.4 else None
     drawn = []
     for ax, platform in zip(axes, platforms):
         phasers = phasers_on(platform)
@@ -210,7 +215,7 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper
                     continue
                 drawn.append(v)
                 # the value alone, no change against the first bar of the group
-                label_bar(ax, x + dx, v, w, value_text(v))
+                label_bar(ax, x + dx, v, w, value_text(v), label_size)
         group_ticks(ax, [st.PHASER_LABEL[p] for p in phasers])
         ax.set_title(st.PLATFORM_LABEL[platform])
     if not drawn:
@@ -464,8 +469,8 @@ def side_bars(ctx, name, size, title, platforms, columns):
                     ax.barh(yy, v, height=0.8 / n * 0.9, color=color, alpha=alpha, hatch=hatch,
                             edgecolor="white" if hatch else "none", linewidth=0, zorder=3)
                     ax.annotate(value_text(v), (v, yy), xytext=(1.5, 0), textcoords="offset points",
-                                ha="left", va="center", fontsize=st.SMALL_FONT, color=st.INK, zorder=4,
-                                annotation_clip=False)
+                                ha="left", va="center", fontsize=st.SMALL_FONT if w / len(columns) > 30 else 4,
+                                color=st.INK, zorder=4, annotation_clip=False)
                     drawn.append(v)
             ax.set_yticks(range(len(rows[c][platform])))
             ax.set_yticklabels([label for label, _ in rows[c][platform]] if c == 0 else [])
@@ -481,6 +486,13 @@ def side_bars(ctx, name, size, title, platforms, columns):
         axes[0].set_xscale("log")
         axes[0].set_xlim(lo / 2, hi * 8)
         log_ticks(axes[0].xaxis, lo / 2, hi * 8)
+        if w / len(columns) <= 30:
+            # a narrow column: decades only, every other one when there are many
+            first, last = math.ceil(math.log10(lo / 2)), math.floor(math.log10(hi * 8))
+            ticks = [10.0 ** k for k in range(first, last + 1)]
+            ticks = ticks[::2] if len(ticks) > 3 else ticks
+            axes[0].xaxis.set_major_locator(FixedLocator(ticks))
+            axes[0].xaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
         axes[-1].set_xlabel(xlabel)
     paper_title(fig, title)
     return save(fig, ctx, name)
@@ -518,9 +530,9 @@ def figC1_side(db, ctx, sample, ref, depth):
             return out
         return rows_of
     return side_bars(ctx, fig_name("figC1_side_switch_ng50_%dx" % depth, sample, ref), "asm_side",
-                     "Alignment-based and assembly-based phasing: switch error rate and phase-block NG50",
-                     platforms, [("Switch error rate (%%), %d×" % depth, rows(switch_pct)),
-                                 ("Phase-block NG50 (Mb), %d×" % depth, rows(n50_mb))])
+                     "Alignment-based and assembly-based phasing, %d×" % depth,
+                     platforms, [("Switch error\nrate (%)", rows(switch_pct)),
+                                 ("Phase-block\nNG50 (Mb)", rows(n50_mb))])
 
 
 # --------------------------------------------------------------------- main
