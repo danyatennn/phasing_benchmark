@@ -437,7 +437,8 @@ def figB6_scatter(db, ctx, sample, ref):
     methylation, ONT 5 kHz and PacBio Revio side by side, each with its own
     axes. A phaser has its own marker and colour: open alone, an arrow to the
     filled + MethPhaser point; LongPhase in its own 5mC mode is a star at the
-    end of a dotted arrow."""
+    end of a dotted arrow. The switch axis runs from more to fewer errors, so
+    the top right corner is best."""
     platforms = [p for p in ("ont5k", "revio")
                  if any(db.has((ref, "truth", p, DEPTH, "mp" + ph)) for ph in phasers_on(p))]
     if not platforms:
@@ -482,7 +483,7 @@ def figB6_scatter(db, ctx, sample, ref):
         ax.set_xscale("log")
         ax.set_yscale("log")
         xlo, xhi, ylo, yhi = min(xs) / 1.5, max(xs) * 1.5, min(ys) / 1.2, max(ys) * 1.2
-        ax.set_xlim(xlo, xhi)
+        ax.set_xlim(xhi, xlo)          # reversed: fewer switches to the right, the top right corner is best
         ax.set_ylim(ylo, yhi)
         log_ticks_13(ax.xaxis, xlo, xhi)
         log_ticks_13(ax.yaxis, ylo, yhi)
@@ -490,7 +491,7 @@ def figB6_scatter(db, ctx, sample, ref):
             ax.yaxis.set_major_locator(FixedLocator([float("%.2g" % min(ys)), float("%.2g" % max(ys))]))
         ax.grid(color=st.GRID, linewidth=0.5)
         ax.set_axisbelow(True)
-        ax.set_xlabel("Switch error rate (%)")
+        ax.set_xlabel("Switch error rate (%,\nlower to the right)")
         if i == 0:
             ax.set_ylabel("Phase-block NG50 (Mb)")
     if not shown:
