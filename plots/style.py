@@ -157,6 +157,9 @@ PAPER_PANELS = {
     # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
     "r7_small": (60, 52),
     "meth_scatter": (68, 52),               # figB6: switch vs NG50 with/without methylation, Fig. 3c
+    "upset_crossref": (PAGE_WIDTH, 70),     # figU1: reads of a stratum on the other reference
+    "upset_labels": (110, 70),              # figU2: the three parental labelling methods
+    "runtime_mirror": (85, 80),             # figT3: run time up, memory down, one chromosome
     "experiment_meth": (PAGE_WIDTH, 50),         # figB1, figB3
     "experiment_meth_legend": (PAGE_WIDTH, 56),  # figB4, the legend under it
     "regions_profile": (84, 80),   # figR13a beside figR13b
