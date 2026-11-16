@@ -25,10 +25,11 @@ its agreement are printed).
 -> <out>.tsv   run reference region reads correct recall_pct  (region: CMRG, then each gene
               with --min-gene-reads reads or more)
 
-Left out (--exclude): A4GALT, where the benchmark's H1 is the maternal
-haplotype while it is the paternal one on the rest of chr22 (none of the
-labelled reads agrees), and DAZL, where T2T-CHM13 v1.0 has no chrY and the
-reads of the DAZ genes of chrY align to it (on GRCh38 they go to chrY).
+Every gene is counted. --exclude can leave genes out for a check, e.g.
+A4GALT (the benchmark's H1 is the maternal haplotype there while it is the
+paternal one on the rest of chr22: none of the labelled reads agrees) and DAZL
+(T2T-CHM13 v1.0 has no chrY, so the reads of the DAZ genes of chrY align to it;
+on GRCh38 they go to chrY).
 """
 
 import argparse
@@ -42,7 +43,7 @@ AUTOSOMES = {"chr%d" % i for i in range(1, 23)}
 FRACTION = 0.5
 MIN_READ_SNPS = 2
 MIN_BLOCK_SNPS = 2
-EXCLUDE = "A4GALT,DAZL"
+EXCLUDE = ""
 
 
 def opener(path):
@@ -194,7 +195,7 @@ def main():
     ap.add_argument("--anchor-bed", required=True, help="the CMRG benchmark BED of the anchor")
     ap.add_argument("--other", required=True, help="name=cmrg_dev/GRCh38/<input>")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--exclude", default=EXCLUDE, help="genes left out, comma-separated (default %(default)s)")
+    ap.add_argument("--exclude", default=EXCLUDE, help="genes left out, comma-separated (default none)")
     ap.add_argument("--min-gene-reads", type=int, default=10,
                     help="a gene's own row only with this many reads or more (CMRG counts every read)")
     a = ap.parse_args()
