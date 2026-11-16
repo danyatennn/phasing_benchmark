@@ -49,7 +49,7 @@ import matplotlib.colors as matplotlib_colors
 
 import style as st
 from data import GENE_SET, GENE_SET_DIR, sample_root
-from figures import (NoData, SameDecimals, colorbar, heatmap, log_ticks, paper_title, same_decimals, save, series_handle,
+from figures import (NoData, pin_axes, SameDecimals, colorbar, heatmap, log_ticks, paper_title, same_decimals, save, series_handle,
                      sig_number, stratum_label, top_legend, y_grid)
 
 
@@ -526,6 +526,7 @@ def r7_small(ctx, phaser, ref, start, end):
     legend_ax.legend(handles=platforms + ends, loc="center", ncol=(len(platforms) + 3) // 2, borderaxespad=0,
                      handletextpad=0.1, columnspacing=0.6, labelspacing=0.3)
     paper_title(fig, "Phasing performance in genome-wide and difficult regions")
+    pin_axes(fig, ax, st.ROW_1DE)           # in line with Fig. 1d
     return save(fig, ctx, "figR7_difficult_drop_%s_%s_small" % (phaser, ref))
 
 
@@ -1466,9 +1467,10 @@ def r18_plot(ctx, by, val, sfx):
             continue
         platforms = [p for p in st.PLATFORMS if any(k[2] == p for k in keys)]
         phasers = [ph for ph in order if any(k[3] == ph for k in keys)]
-        ncols = min(4, len(strata))
+        fig1c = metric == "recall_bases"
+        ncols = min(2 if fig1c else 4, len(strata))
         nrows = math.ceil(len(strata) / ncols)
-        w, h = st.PAPER_PANELS["r18"]
+        w, h = st.PAPER_PANELS["r18_fig1c" if fig1c else "r18"]
         fig, axes = plt.subplots(nrows, ncols, squeeze=False, figsize=(w * st.MM, h * st.MM),
                                  layout="constrained")
         width = 0.84 / len(phasers)

@@ -127,7 +127,7 @@ SMALL_WIDTH = 56  # mm, a third of the page (Fig. 1d, 1e)
 # three in a row. Fig. 2: a beside b; c over d beside e over f; g across.
 # Fig. 3: a, b, c, d one under the other, across the page.
 PAPER_PANELS = {
-    "heatmap": (110, 64),          # Fig. 1b, figS2b, one per reference
+    "heatmap": (99, 60),           # Fig. 1b, figS2b, one per reference
     "regions": (66, 86),           # figR2, beside the heatmap of the switch errors by region
     "small": (SMALL_WIDTH, 56),    # Fig. 1e fig6b/fig6d by platform
     "fig1d": (SMALL_WIDTH, 62),    # Fig. 1d fig6e, the phaser legend under it
@@ -155,7 +155,11 @@ PAPER_PANELS = {
     # Fig. 2 (the page with the chromosome figure): b and c, side by side
     "samples_paper": (83, 34),              # fig9a/fig9b of ONT 5 kHz, the three samples
     # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
-    "r7_small": (52, 44),                   # beside Fig. 1d, between the heatmap and the GIAB samples
+    # Fig. 1d (the NG50 ratios by platform) beside 1e, between the heatmap
+    # and the GIAB samples: as high as each other, their axes pinned to the
+    # same top and bottom (ROW_1DE) so the two plots line up
+    "ratio_by_platform": (45, 46),
+    "r7_small": (52, 46),
     "meth_scatter": (46, 108),              # figB6: the platforms one over the other, as high as the region view + B5
     "meth_longphase": (121, 46),            # figB5, under the region view of the methylation figure
     # the read page, 225 mm: R5 | R3c, fig10d | R20 (~110 as placed), U2 | T3 (56), U1 (48), gaps
@@ -173,8 +177,12 @@ PAPER_PANELS = {
     "confidence": (70, 52),        # fig10d, under figR5
     "transitions": (98, 52),       # figR20 of one platform, beside fig10d
     "r18": (100, 56),              # figR18, under fig10d, beside the ideogram
+    "r18_fig1c": (62, 102),        # figR18 of read recall in bases, Fig. 1c: two columns, beside 1b and 1d/1e
     "rescued": (84, 62),           # figR21
 }
+
+# Fig. 1d and 1e: mm from the top and the bottom of the figure to the axes
+ROW_1DE = (12, 17.2)
 
 FONT_STACK = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
 

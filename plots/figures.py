@@ -22,6 +22,7 @@ Which denominators are shared, and so what may be compared with what:
 
 import math
 import os
+import sys
 import textwrap
 
 import numpy as np
@@ -64,6 +65,22 @@ def panel_size(key):
     """figsize of a panel of the paper, st.PAPER_PANELS"""
     w, h = st.PAPER_PANELS[key]
     return w * st.MM, h * st.MM
+
+
+def pin_axes(fig, ax, margins):
+    """Lay the figure out, then fix the plot's top and bottom at margins =
+    (mm from the top, mm from the bottom), so plots of two figures placed side
+    by side line up (st.ROW_1DE). Says so when the layout wanted more room."""
+    fig.canvas.draw()
+    pos = ax.get_position()
+    fig.set_layout_engine("none")
+    height = fig.get_figheight() / st.MM
+    y0, y1 = margins[1] / height, 1 - margins[0] / height
+    need = ((1 - pos.y1) * height, pos.y0 * height)
+    if need[0] > margins[0] + 0.3 or need[1] > margins[1] + 0.3:
+        print("note: the layout wanted %.1f mm over and %.1f mm under the plot, pinned at %g and %g"
+              % (need + tuple(margins)), file=sys.stderr)
+    ax.set_position([pos.x0, y0, pos.width, y1 - y0])
 
 
 def paper_title(fig, text):
@@ -607,10 +624,11 @@ def figS1(db, ctx, ref, caller="truth"):
 
 # ------------------------------------------------------------------- heatmaps
 
-def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, label=None, **image):
+def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, label=None, cell_font=None, **image):
     """Rows and columns come in labelled groups; a cell with no value is
     hatched, never painted as a low value. label(value) -> text writes the
-    value into each cell, in ink or white, whichever reads on that colour."""
+    value into each cell, in ink or white, whichever reads on that colour,
+    at cell_font (default st.CELL_FONT)."""
     arr = np.ma.masked_invalid(np.asarray(matrix, dtype=float))
     nrow, ncol = arr.shape
     ax.add_patch(Rectangle((-0.5, -0.5), ncol, nrow, facecolor="white",
@@ -625,7 +643,7 @@ def heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups, label=No
                 red, green, blue, _ = im.cmap(im.norm(arr[r, c]))
                 dark = 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5
                 ax.text(c, r, label(arr[r, c]), ha="center", va="center", zorder=3,
-                        fontsize=st.CELL_FONT, color="white" if dark else st.INK)
+                        fontsize=cell_font or st.CELL_FONT, color="white" if dark else st.INK)
 
     row_edges = set(np.cumsum([n for _, n in row_groups])[:-1])
     col_edges = set(np.cumsum([n for _, n in col_groups])[:-1])
@@ -739,8 +757,9 @@ def grid_heatmap(db, ctx, ref, name, value, bar_label, title=None, unit=None):
         raise NoData("no rows for %s" % ref)
 
     fig, ax = plt.subplots(figsize=panel_size("heatmap"), constrained_layout=True)
+    # 20 columns of cells about 3.3 mm wide: "0.70" fits at 4 pt
     im = heatmap(ax, matrix, row_labels, col_labels, row_groups, col_groups,
-                 label=lambda v: f"{v:.2f}", cmap=st.SEQUENTIAL, norm=log_norm(values))
+                 label=lambda v: f"{v:.2f}", cell_font=4, cmap=st.SEQUENTIAL, norm=log_norm(values))
     ax.set_xlabel("Coverage (×)")
     colorbar(fig, im, ax, bar_label, unit)
     paper_title(fig, title)
@@ -1497,12 +1516,13 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
             ticks.append(pos)
             tick_labels.append(box_label)
             pos += 1
-        if group_label:
+        # Fig. 1d: the tick labels name the platforms, so no ONT / PacBio over the plot
+        if group_label and size != "ratio_by_platform":
             ax.annotate(group_label, xy=((first + pos - 1) / 2, 1),
                         xycoords=ax.get_xaxis_transform(), xytext=(0, 22 if turned else 13),
                         textcoords="offset points", ha="center", va="bottom")
-            if g < len(groups) - 1:
-                ax.axvline(pos - 0.5 + 0.35, color=st.GRID, linewidth=0.8, zorder=0)
+        if group_label and g < len(groups) - 1:
+            ax.axvline(pos - 0.5 + 0.35, color=st.GRID, linewidth=0.8, zorder=0)
         pos += 0.7 if g < len(groups) - 1 else 0
     ratio_axis(ax, all_ratios, label, limits)
     paper_title(fig, title)
@@ -1510,6 +1530,8 @@ def reference_box_file(db, ctx, name, value, label, groups, title=None, limits=N
     ax.set_xticklabels(tick_labels, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_xlim(-0.6, pos - 0.4)
     ax.tick_params(axis="x", length=0)
+    if size == "ratio_by_platform":
+        pin_axes(fig, ax, st.ROW_1DE)       # Fig. 1d, in line with 1e
     return save(fig, ctx, name)
 
 
@@ -1565,7 +1587,7 @@ def reference_files(db, ctx, prefix, value, label, subject=None, limits=REFERENC
             [(tech, [(st.PLATFORM_LABEL[pl], st.PLATFORM_COLOR[pl], [(pl, p) for p in st.PHASERS])
                      for pl in platforms])
              for tech, platforms in TECHNOLOGIES], title("sequencing platforms"), limits,
-            size="small")),
+            size="ratio_by_platform")),
     ]
     written = []
     for _, job in jobs:
