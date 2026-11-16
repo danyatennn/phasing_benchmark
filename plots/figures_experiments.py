@@ -162,6 +162,29 @@ def group_panels(platforms, width, height, legend=True):
     return fig, legend_ax, axes
 
 
+def group_panels_2x2(platforms, width, height, legend=True):
+    """As group_panels, the platforms two to a row (ONT over PacBio), each row
+    with its own widths, one y axis shared by all; for a page too narrow for
+    four panels side by side."""
+    rows = [platforms[i:i + 2] for i in range(0, len(platforms), 2)]
+    fig = plt.figure(figsize=(width * st.MM, height * st.MM), constrained_layout=True)
+    outer = fig.add_gridspec(len(rows) + (1 if legend else 0), 1,
+                             height_ratios=[1] * len(rows) + ([0.12] if legend else []))
+    axes = []
+    for r, row in enumerate(rows):
+        inner = outer[r, 0].subgridspec(1, len(row), width_ratios=[len(phasers_on(p)) for p in row])
+        for i in range(len(row)):
+            ax = fig.add_subplot(inner[0, i], sharey=axes[0] if axes else None)
+            if i:
+                ax.tick_params(labelleft=False)
+            axes.append(ax)
+    legend_ax = None
+    if legend:
+        legend_ax = fig.add_subplot(outer[len(rows), 0])
+        legend_ax.axis("off")
+    return fig, legend_ax, axes
+
+
 # the panels of the paper: (st.PAPER_PANELS key, legend?, title) by file
 # prefix; any other file is as wide as the page with its legend, no title.
 # The legend goes under the last panel of each figure only (A4, B4).
@@ -197,17 +220,22 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper
     tag, ylabel, value, log = metric
     size, with_legend, title = paper or (None, True, None)
     width, height = st.PAPER_PANELS[size] if size else (st.FULL_WIDTH, st.PANEL_HEIGHT + 14)
-    fig, legend_ax, axes = group_panels(platforms, width, height, with_legend)
+    grid2 = bool(size) and size.startswith("experiment_grid")
+    fig, legend_ax, axes = (group_panels_2x2 if grid2 else group_panels)(platforms, width, height, with_legend)
     # the labels are turned: neighbouring bars closer than ~2.4 mm take a smaller font
     n_bars = max(len(bars_of(platforms[0], phasers_on(platforms[0])[0])), 1)
-    bar_mm = 0.85 * width / sum(len(phasers_on(p)) for p in platforms) * 0.8 / n_bars
+    per_row = [platforms[i:i + 2] for i in range(0, len(platforms), 2)] if grid2 else [platforms]
+    groups = max(sum(len(phasers_on(p)) for p in row) for row in per_row)
+    # a narrow figure: the bars of a group wider apart, so their turned labels do not touch
+    group_width = 0.72 if grid2 else 0.88 if size and size.startswith("experiment_narrow") else 0.8
+    bar_mm = 0.85 * width / groups * group_width / n_bars
     label_size = 4 if bar_mm < 2.4 else None
     drawn = []
     for ax, platform in zip(axes, platforms):
         phasers = phasers_on(platform)
         for x, phaser in enumerate(phasers):
             group = bars_of(platform, phaser)
-            xs, w = offsets(len(group))
+            xs, w = offsets(len(group), group_width)
             values = [value(db, k) for k, _, _ in group]
             values = [positive(v) for v in values] if log else values
             for dx, v, (_, alpha, hatch) in zip(xs, values, group):
@@ -222,6 +250,12 @@ def compare_groups(db, ctx, name, ref, metric, platforms, bars_of, legend, paper
         plt.close(fig)
         raise NoData("no %s values" % tag)
     scale_axes(axes, drawn, log, ylabel)
+    if grid2:
+        # the y label once per row, on its first panel
+        for i, ax in enumerate(axes):
+            ax.set_ylabel(ylabel if i % 2 == 0 else "")
+            if i % 2 == 0:
+                ax.tick_params(labelleft=True)
     if tag.startswith("read_recall"):
         zoom_recall(axes[0], drawn)
     top_legend(legend_ax, legend_patches(legend))

@@ -144,12 +144,14 @@ PAPER_PANELS = {
     # page stays within 230 mm: 70 + 50 + 50 + 56 and the gaps
     # Fig. 3: A1 over A3 (the legend under A3) on the left, the methylation
     # NG50 (figB3_side, horizontal bars) on their right; 130 + 4 + 36 = 170
-    "experiment_narrow": (130, 36),         # figA1
-    "experiment_narrow_legend": (130, 41),  # figA3, the legend under it
-    "meth_side": (36, 77),                  # figB3_side, as high as A1 + A3
+    "experiment_narrow": (130, 46),         # figA1, a row of four panels
+    "experiment_narrow_legend": (130, 50),  # figA3, the legend under it
+    "experiment_grid": (130, 70),           # two platforms to a row (needs ~70 mm a metric)
+    "experiment_grid_legend": (130, 76),
+    "meth_side": (36, 96),                  # figB3_side, as high as A1 + A3
     # the assemblies against the phasers beside the chromosome figure of the
     # switch errors (assembly gaps)
-    "asm_side": (43, 78),                   # figC1_side: switch | NG50, beside the chromosome figure (123 mm)
+    "asm_side": (44, 84),                   # figC1_side: switch | NG50, beside the chromosome figure (122 mm)
     # Fig. 2 (the page with the chromosome figure): b and c, side by side
     "samples_paper": (83, 34),              # fig9a/fig9b of ONT 5 kHz, the three samples
     # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
