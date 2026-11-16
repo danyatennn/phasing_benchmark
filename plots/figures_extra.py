@@ -735,9 +735,9 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         ax.set_xticklabels([sample_label(s) + ("$^\\dagger$" if s in dagger else "") for s in here],
                            fontweight="bold")
         ax.set_xlim(-0.55, len(here) - 0.45)
-        ax.set_title(st.PLATFORM_LABEL[platform])
+        ax.set_title(st.PLATFORM_LABEL[platform] + (", " + st.REFERENCE_LABEL[ref] if size else ""))
     lo, hi = min(drawn), max(drawn)
-    top = hi * 1.3 if log else min(100.0, hi + 0.05 * max(hi, 1)) if "recall" in name else hi * 1.05
+    top = hi * (3 if size else 1.3) if log else min(100.0, hi + 0.05 * max(hi, 1)) if "recall" in name else hi * 1.05
     bottom = tall_bottom(lo, top, log)
     if log:
         axes[0].set_yscale("log")
@@ -748,12 +748,21 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
     for ax in axes:
         ax.grid(axis="y", color=st.GRID, linewidth=0.5, zorder=0)
         ax.set_axisbelow(True)
-    # inside each bar: the name at its foot, the value at its top, both turned
+    # inside each bar: the name at its foot, the value at its top, both turned;
+    # a bar too short for both (about 1 mm a character at 5 pt) has its value over it
+    axis_mm = height - 16
+
+    def share(v):
+        if log:
+            return math.log10(v / bottom) / math.log10(top / bottom)
+        return (v - bottom) / (top - bottom)
     for ax, x, v, s in bars:
         ax.annotate(label_of[s], (x, bottom), xytext=(0, 2), textcoords="offset points", rotation=90,
                     ha="center", va="bottom", fontsize=st.SMALL_FONT, color=st.INK, zorder=4)
-        ax.annotate(value_text(v), (x, v), xytext=(0, -2), textcoords="offset points", rotation=90,
-                    ha="center", va="top", fontsize=st.SMALL_FONT, color=st.INK, zorder=4, fontweight="bold")
+        inside = share(v) * axis_mm >= len(label_of[s]) + len(value_text(v)) + 2
+        ax.annotate(value_text(v), (x, v), xytext=(0, -2 if inside else 2), textcoords="offset points", rotation=90,
+                    ha="center", va="top" if inside else "bottom", fontsize=st.SMALL_FONT, color=st.INK, zorder=4,
+                    fontweight="bold", annotation_clip=False)
     if dagger:
         note_ax.text(0.5, 0.5, "$^\\dagger$reads against whatshap haplotag with the phased truth VCF (no parental labels)",
                      ha="center", va="center", transform=note_ax.transAxes)
@@ -761,8 +770,10 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
     return save(fig, ctx, "%s_%dx_%s%s" % (name, depth, ref, "_" + "_".join(only) if only else ""))
 
 
-# the panels of the paper: ONT 5 kHz alone, the one platform of all three samples
-SAMPLES_PAPER = ("fig9a_samples_switch_rate", "fig9b_samples_block_ng50")
+# the panels of the paper: ONT 5 kHz alone, the one platform of all three
+# samples, 34 mm high: a one-line title, the reference in the panel title
+SAMPLES_PAPER = {"fig9a_samples_switch_rate": "Switch error rate across GIAB samples",
+                 "fig9b_samples_block_ng50": "Phase-block NG50 across GIAB samples"}
 
 
 def sample_figures(dbs, ctx):
@@ -770,10 +781,10 @@ def sample_figures(dbs, ctx):
     for name, value, ylabel, log, by, title in SAMPLE_METRICS:
         variants = [dict()]
         if name in SAMPLES_PAPER:
-            variants.append(dict(only=("ont5k",), size="samples_paper"))
+            variants.append(dict(only=("ont5k",), size="samples_paper", title=SAMPLES_PAPER[name]))
         for extra in variants:
             try:
-                out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by, title, **extra))
+                out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by, **dict(dict(title=title), **extra)))
             except NoData:
                 pass
             finally:

@@ -455,6 +455,11 @@ def side_bars(ctx, name, size, title, platforms, columns):
         raise NoData("no values for %s" % name)
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
     grid = fig.add_gridspec(len(platforms), len(columns), height_ratios=[len(rows[0][p]) for p in platforms])
+    # the value labels: 5 pt where a bar is 2.2 mm high or more and the column 20 mm wide, else 4 pt
+    n_rows = sum(len(rows[0][p]) for p in platforms)
+    n_bars = max(len(bars) for p in platforms for _, bars in rows[0][p])
+    bar_mm = 0.7 * h / n_rows * 0.8 / n_bars
+    label_size = st.SMALL_FONT if bar_mm >= 2.2 and w / len(columns) > 20 else 4
     for c, (xlabel, _) in enumerate(columns):
         axes, drawn = [], []
         for i, platform in enumerate(platforms):
@@ -469,7 +474,7 @@ def side_bars(ctx, name, size, title, platforms, columns):
                     ax.barh(yy, v, height=0.8 / n * 0.9, color=color, alpha=alpha, hatch=hatch,
                             edgecolor="white" if hatch else "none", linewidth=0, zorder=3)
                     ax.annotate(value_text(v), (v, yy), xytext=(1.5, 0), textcoords="offset points",
-                                ha="left", va="center", fontsize=st.SMALL_FONT if w / len(columns) > 30 else 4,
+                                ha="left", va="center", fontsize=label_size,
                                 color=st.INK, zorder=4, annotation_clip=False)
                     drawn.append(v)
             ax.set_yticks(range(len(rows[c][platform])))
