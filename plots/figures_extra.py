@@ -735,10 +735,13 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         ax.set_xticklabels([sample_label(s) + ("$^\\dagger$" if s in dagger else "") for s in here],
                            fontweight="bold")
         ax.set_xlim(-0.55, len(here) - 0.45)
-        ax.set_title(st.PLATFORM_LABEL[platform] + (", " + st.REFERENCE_LABEL[ref] if size else ""))
+        if not size:
+            ax.set_title(st.PLATFORM_LABEL[platform])
     lo, hi = min(drawn), max(drawn)
-    top = hi * (3 if size else 1.3) if log else min(100.0, hi + 0.05 * max(hi, 1)) if "recall" in name else hi * 1.05
-    bottom = tall_bottom(lo, top, log)
+    top = hi * 1.3 if log else min(100.0, hi + 0.05 * max(hi, 1)) if "recall" in name else hi * 1.05
+    # the paper panel is low: on a log axis its bottom three decades under the
+    # smallest bar, so every bar holds its name and value
+    bottom = 10 ** math.floor(math.log10(lo / 1000)) if (size and log) else tall_bottom(lo, top, log)
     if log:
         axes[0].set_yscale("log")
         log_ticks(axes[0].yaxis, bottom, top)
@@ -750,7 +753,8 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         ax.set_axisbelow(True)
     # inside each bar: the name at its foot, the value at its top, both turned;
     # a bar too short for both (about 1 mm a character at 5 pt) has its value over it
-    axis_mm = height - 16
+    fig.canvas.draw()
+    axis_mm = axes[0].get_window_extent().height / fig.dpi * 25.4
 
     def share(v):
         if log:
@@ -759,7 +763,8 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
     for ax, x, v, s in bars:
         ax.annotate(label_of[s], (x, bottom), xytext=(0, 2), textcoords="offset points", rotation=90,
                     ha="center", va="bottom", fontsize=st.SMALL_FONT, color=st.INK, zorder=4)
-        inside = share(v) * axis_mm >= len(label_of[s]) + len(value_text(v)) + 2
+        # about 1 mm a character at 5 pt, and 2 pt of margin at each end
+        inside = share(v) * axis_mm >= len(label_of[s]) + len(value_text(v)) + 1.5
         ax.annotate(value_text(v), (x, v), xytext=(0, -2 if inside else 2), textcoords="offset points", rotation=90,
                     ha="center", va="top" if inside else "bottom", fontsize=st.SMALL_FONT, color=st.INK, zorder=4,
                     fontweight="bold", annotation_clip=False)
@@ -781,7 +786,8 @@ def sample_figures(dbs, ctx):
     for name, value, ylabel, log, by, title in SAMPLE_METRICS:
         variants = [dict()]
         if name in SAMPLES_PAPER:
-            variants.append(dict(only=("ont5k",), size="samples_paper", title=SAMPLES_PAPER[name]))
+            variants.append(dict(only=("ont5k",), size="samples_paper",
+                                 title=SAMPLES_PAPER[name] + " (ONT 5 kHz, GRCh38)"))
         for extra in variants:
             try:
                 out.append(samples_figure(dbs, ctx, name, value, ylabel, log, by, **dict(dict(title=title), **extra)))
