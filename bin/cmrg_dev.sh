@@ -45,6 +45,9 @@ V1_URL="https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblie
 V1_FA="${PROJECT_ROOT}/ref/chm13.draft_v1.0.fa"
 GENES_TSV="${PROJECT_ROOT}/regions/genes/CMRG/genes.tsv"
 GENES_GRCH38="${PROJECT_ROOT}/data/annotation/cmrg/GRCh38_CMRG_benchmark_gene_coordinates.bed"
+# GIAB, CHM13v1.0/SupplementaryFiles: the GRCh38 equivalent of each row of the
+# v1.0 CMRG BED, INTERVAL_<n> = its row n (lengths agree for 2615 of 2616 rows)
+GENES_EQUIV="${PROJECT_ROOT}/data/annotation/cmrg/HG002_CHM13_CMRG_smallvar_v1.00_GRCh38-equiv-regions_draft.bed"
 OUT="${PROJECT_ROOT}/cmrg_dev"
 B="${OUT}/${CMRG_REF}/bam"
 D="${OUT}/${CMRG_REF}/${CMRG_INPUT}"
@@ -168,17 +171,31 @@ eval)
   genes="${D}/eval/genes.bed"
   if [[ "${CMRG_REF}" == GRCh38 ]]; then
     awk -F'\t' -v OFS='\t' '{ print $1, $2, $3, $4 }' "${GENES_GRCH38}" >"${genes}"
-  elif [[ ! -s "${genes}" ]]; then
-    # the GRCh38 gene sequences placed on v1.0: the primary hit that covers
-    # 90% of the gene or more
-    log "placing the CMRG genes on v1.0 (minimap2 asm5 of their GRCh38 sequence)"
-    awk -F'\t' '{ printf "%s:%d-%d\t%s\n", $1, $2 + 1, $3, $4 }' "${GENES_GRCH38}" >"${D}/eval/regions.txt"
-    cut -f1 "${D}/eval/regions.txt" | "${SAMTOOLS}" faidx -r - "${REF_GRCH38}" >"${D}/eval/genes.fa"
-    "${MINIMAP2}" -t 16 -cx asm5 "${V1_FA}" "${D}/eval/genes.fa" >"${D}/eval/genes.paf"
-    awk -F'\t' -v OFS='\t' 'NR == FNR { name[$1] = $2; next }
-      /tp:A:P/ && $4 - $3 >= 0.9 * $2 && $10 > best[$1] { best[$1] = $10; hit[$1] = $6 OFS $8 OFS $9 OFS name[$1] }
-      END { for (q in hit) print hit[q] }' "${D}/eval/regions.txt" "${D}/eval/genes.paf" \
-      | sort -k1,1 -k2,2n >"${genes}"
+  else
+    # a gene on v1.0: the rows of the v1.0 CMRG BED whose GRCh38 equivalent
+    # (GIAB) overlaps the gene on GRCh38, from the first to the last of them, on
+    # the chromosome with most of their bases
+    require_file "${GENES_EQUIV}" "GRCh38 equivalent of the v1.0 CMRG BED (GIAB CHM13v1.0 SupplementaryFiles)"
+    log "placing the CMRG genes on v1.0 by the GRCh38 equivalent of the v1.0 CMRG BED"
+    awk -F'\t' -v OFS='\t' '
+      FILENAME == ARGV[1] { gc[FNR] = $1; gs[FNR] = $2; ge[FNR] = $3; gn[FNR] = $4; ng = FNR; next }
+      FILENAME == ARGV[2] { vc[FNR] = $1; vs[FNR] = $2; ve[FNR] = $3; next }
+      { n = substr($4, 10) + 0
+        if (!(n in vc)) { print "no row " n " in the v1.0 BED: " $0 > "/dev/stderr"; next }
+        for (i = 1; i <= ng; i++) if (gc[i] == $1 && $2 < ge[i] && $3 > gs[i]) {
+          k = gn[i] SUBSEP vc[n]
+          if (!(k in lo) || vs[n] < lo[k]) lo[k] = vs[n]
+          if (ve[n] > hi[k]) hi[k] = ve[n]
+          bp[k] += ve[n] - vs[n]
+          if ($2 < gs[i] || $3 > ge[i]) over[gn[i]]++
+        } }
+      END {
+        for (k in bp) { split(k, x, SUBSEP); chroms[x[1]]++
+          if (bp[k] > best[x[1]]) { best[x[1]] = bp[k]; row[x[1]] = x[2] OFS lo[k] OFS hi[k] OFS x[1] } }
+        for (g in row) print row[g]
+        for (g in chroms) if (chroms[g] > 1) print "  " g ": rows on " chroms[g] " chromosomes of v1.0, the largest kept" > "/dev/stderr"
+        for (g in over) print "  " g ": " over[g] " row(s) reaching past the gene on GRCh38, kept whole" > "/dev/stderr"
+      }' "${GENES_GRCH38}" "${CBED}" "${GENES_EQUIV}" | sort -k1,1 -k2,2n >"${genes}"
     log "$(wc -l <"${genes}") of $(wc -l <"${GENES_GRCH38}") genes placed on v1.0"
   fi
   runs=()
