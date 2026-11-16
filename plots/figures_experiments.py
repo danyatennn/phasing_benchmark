@@ -60,8 +60,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator, NullLocator
 
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
@@ -422,6 +423,94 @@ def figB5(db, ctx, sample, ref):
     return save(fig, ctx, fig_name("figB5_longphase_methylation", sample, ref))
 
 
+def log_ticks_13(axis, lo, hi):
+    """1 and 3 of each decade between lo and hi, plain numbers: few enough for a narrow panel"""
+    ticks = [m * 10.0 ** k for k in range(math.floor(math.log10(lo)), math.ceil(math.log10(hi)) + 1)
+             for m in (1, 3) if lo <= m * 10.0 ** k <= hi]
+    axis.set_major_locator(FixedLocator(ticks))
+    axis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+    axis.set_minor_locator(NullLocator())
+
+
+def figB6_scatter(db, ctx, sample, ref):
+    """Switch error rate against phase-block NG50 with and without DNA
+    methylation, ONT 5 kHz and PacBio Revio side by side, each with its own
+    axes: each phaser alone (open) with an arrow to the same phaser +
+    MethPhaser (filled), and LongPhase in its own 5mC mode (diamond, dotted
+    arrow); the phasers' colours of A and B."""
+    platforms = [p for p in ("ont5k", "revio")
+                 if any(db.has((ref, "truth", p, DEPTH, "mp" + ph)) for ph in phasers_on(p))]
+    if not platforms:
+        raise NoData("no MethPhaser runs of %s on %s" % (sample, ref))
+    w, h = st.PAPER_PANELS["meth_scatter"]
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(2, len(platforms), height_ratios=[1, 0.2])
+    shown = []
+    for i, platform in enumerate(platforms):
+        ax = fig.add_subplot(grid[0, i])
+        xs, ys = [], []
+        for ph in phasers_on(platform):
+            k0 = (ref, "truth", platform, DEPTH, ph)
+            x0, y0 = switch_pct(db, k0), n50_mb(db, k0)
+            if not (finite(x0) and finite(y0) and x0 > 0 and y0 > 0):
+                continue
+            c = st.PHASER_COLOR[ph]
+            if ph not in shown:
+                shown.append(ph)
+            ax.plot(x0, y0, marker="o", markersize=3.5, markerfacecolor="white", markeredgecolor=c,
+                    markeredgewidth=0.9, linestyle="none", zorder=4)
+            xs.append(x0)
+            ys.append(y0)
+            for other, marker, style in (("mp" + ph, "o", "-"), ("lpmod" if ph == "longphase" else None, "D", ":")):
+                if not other:
+                    continue
+                k1 = (ref, "truth", platform, DEPTH, other)
+                x1, y1 = switch_pct(db, k1), n50_mb(db, k1)
+                if not (finite(x1) and finite(y1) and x1 > 0 and y1 > 0):
+                    continue
+                ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
+                            arrowprops=dict(arrowstyle="-|>", color=c, linewidth=0.7, linestyle=style,
+                                            shrinkA=2.5, shrinkB=2.5, mutation_scale=5), zorder=3)
+                ax.plot(x1, y1, marker=marker, markersize=3.5 if marker == "o" else 3, color=c,
+                        markeredgecolor="white", markeredgewidth=0.4, linestyle="none", zorder=4)
+                xs.append(x1)
+                ys.append(y1)
+        if not xs:
+            empty_panel(ax)
+            continue
+        ax.set_title(st.PLATFORM_LABEL[platform])
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        xlo, xhi, ylo, yhi = min(xs) / 1.5, max(xs) * 1.5, min(ys) / 1.25, max(ys) * 1.25
+        ax.set_xlim(xlo, xhi)
+        ax.set_ylim(ylo, yhi)
+        log_ticks_13(ax.xaxis, xlo, xhi)
+        log_ticks_13(ax.yaxis, ylo, yhi)
+        if ylo > 0 and len(ax.get_yticks()) < 2:
+            # a narrow NG50 range: its ends as the ticks
+            ax.yaxis.set_major_locator(FixedLocator([float("%.2g" % min(ys)), float("%.2g" % max(ys))]))
+        ax.grid(color=st.GRID, linewidth=0.5)
+        ax.set_axisbelow(True)
+        ax.set_xlabel("Switch error rate (%)")
+        if i == 0:
+            ax.set_ylabel("Phase-block NG50 (Mb)")
+    if not shown:
+        plt.close(fig)
+        raise NoData("no switch rates of the MethPhaser runs of %s on %s" % (sample, ref))
+    legend_ax = fig.add_subplot(grid[1, :])
+    legend_ax.axis("off")
+    handles = [Line2D([], [], marker="o", linestyle="none", markersize=3, color=st.PHASER_COLOR[ph],
+                      label=st.PHASER_LABEL[ph]) for ph in shown]
+    handles += [Line2D([], [], marker="o", linestyle="none", markersize=3, markerfacecolor="white",
+                       markeredgecolor=st.MUTED, label="Alone"),
+                Line2D([], [], marker="o", linestyle="none", markersize=3, color=st.MUTED, label="+ MethPhaser"),
+                Line2D([], [], marker="D", linestyle="none", markersize=2.6, color=st.MUTED, label="LongPhase + 5mC")]
+    legend_ax.legend(handles=handles, loc="center", ncol=4, borderaxespad=0, columnspacing=0.7,
+                     handletextpad=0.1, handlelength=1.0, frameon=False, fontsize=st.SMALL_FONT)
+    paper_title(fig, "Switch error rate and NG50 with and without methylation")
+    return save(fig, ctx, fig_name("figB6_meth_scatter", sample, ref))
+
+
 # ---------------------------------------------------------- C: assemblies
 
 def figC_metric(db, ctx, sample, ref, number, metric, depth, with_hifiasm):
@@ -652,6 +741,7 @@ def main():
                     results.append(run("B %s %s LongPhase 5mC" % (sample, ref),
                                        figB5, db, ctx, sample, ref))
                     results.append(run("B %s %s NG50 beside A" % (sample, ref), figB3_side, db, ctx, sample, ref))
+                    results.append(run("B %s %s switch vs NG50" % (sample, ref), figB6_scatter, db, ctx, sample, ref))
         if "C" in only:
             db = Metrics(ctx.root, sample, st.REGION, readacc_rules=ctx.rules).load(
                 refs, ["truth"] + ASSEMBLERS, st.PLATFORMS, [ctx.asm_depth], st.PHASERS + ["dipcall"])

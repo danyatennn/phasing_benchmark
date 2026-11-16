@@ -156,6 +156,7 @@ PAPER_PANELS = {
     "samples_paper": (83, 34),              # fig9a/fig9b of ONT 5 kHz, the three samples
     # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
     "r7_small": (60, 52),
+    "meth_scatter": (68, 52),               # figB6: switch vs NG50 with/without methylation, Fig. 3c
     "experiment_meth": (PAGE_WIDTH, 50),         # figB1, figB3
     "experiment_meth_legend": (PAGE_WIDTH, 56),  # figB4, the legend under it
     "regions_profile": (84, 80),   # figR13a beside figR13b
