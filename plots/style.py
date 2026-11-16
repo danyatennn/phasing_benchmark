@@ -142,6 +142,14 @@ PAPER_PANELS = {
     # the methylation figure: the MethPhaser schematic on top, 170 x 70 mm,
     # then B1, B3, B4 a little lower than the other experiment panels, so the
     # page stays within 230 mm: 70 + 50 + 50 + 56 and the gaps
+    # Fig. 3: A1 over A3 (the legend under A3) on the left, the methylation
+    # NG50 (figB3_side, horizontal bars) on their right; 126 + 4 + 40 = 170
+    "experiment_narrow": (126, 62),         # figA1
+    "experiment_narrow_legend": (126, 68),  # figA3, the legend under it
+    "meth_side": (40, 130),                 # figB3_side, as high as A1 + A3
+    # the assemblies against the phasers beside the chromosome figure of the
+    # switch errors (assembly gaps)
+    "asm_side": (84, 120),                  # figC1_side: switch | NG50
     "experiment_meth": (PAGE_WIDTH, 50),         # figB1, figB3
     "experiment_meth_legend": (PAGE_WIDTH, 56),  # figB4, the legend under it
     "regions_profile": (84, 80),   # figR13a beside figR13b

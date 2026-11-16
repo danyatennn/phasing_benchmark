@@ -65,7 +65,7 @@ from matplotlib.ticker import MaxNLocator
 import style as st
 from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import READ_TRUTH, TRUTH_SFX, Metrics, _read_table, num, ratio, sample_root
-from figures import (NoData, empty_panel, finite, matpat_precision_pct, matpat_recall, matpat_recall_pct,
+from figures import (NoData, empty_panel, finite, log_ticks, matpat_precision_pct, matpat_recall, matpat_recall_pct,
                      n50_mb, panel_row, paper_title, positive, save, switch_pct, top_legend)
 
 DEPTH = 30
@@ -165,8 +165,8 @@ def group_panels(platforms, width, height, legend=True):
 # prefix; any other file is as wide as the page with its legend, no title.
 # The legend goes under the last panel of each figure only (A4, B4).
 PAPER = {
-    "figA1": ("experiment", False, "Impact of additional variant types on switch error rate"),
-    "figA3": ("experiment", False, "Impact of additional variant types on phase-block NG50"),
+    "figA1": ("experiment_narrow", False, "Impact of additional variant types on switch error rate"),
+    "figA3": ("experiment_narrow_legend", True, "Impact of additional variant types on phase-block NG50"),
     "figA4": ("experiment_legend", True, "Impact of additional variant types on read haplotagging recall"),
     "figB1": ("experiment_meth", False, "Effect of DNA methylation integration on switch error rate"),
     "figB3": ("experiment_meth", False, "Effect of DNA methylation integration on phase-block NG50"),
@@ -348,11 +348,12 @@ def figB5(db, ctx, sample, ref):
     size, _, title = PAPER["figB5"]
     w, h = st.PAPER_PANELS[size]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, len(METRICS_B), height_ratios=[1, 0.1])
+    metrics = METRICS_B[:3]          # switch, Hamming, NG50: no read recall
+    grid = fig.add_gridspec(2, len(metrics), height_ratios=[1, 0.1])
     xs, bw = offsets(len(LONGPHASE_METH))
     color = st.PHASER_COLOR["longphase"]
     drawn_any = False
-    for i, (tag, ylabel, value, log) in enumerate(METRICS_B):
+    for i, (tag, ylabel, value, log) in enumerate(metrics):
         ax = fig.add_subplot(grid[0, i])
         drawn = []
         for x, platform in enumerate(platforms):
@@ -433,6 +434,95 @@ def figC_metric(db, ctx, sample, ref, number, metric, depth, with_hifiasm):
     return save(fig, ctx, fig_name("figC%d_%s_%dx" % (number, tag, depth), sample, ref))
 
 
+# ------------------------------------------- horizontal bars, beside a figure
+
+def side_bars(ctx, name, size, title, platforms, columns):
+    """Horizontal bars on log x axes for a narrow column beside another figure:
+    a row of panels per platform (each as tall as its rows), a column per
+    metric with its own x axis, the row labels on the first column only.
+    columns: [(x label, rows_of)], rows_of(platform) -> [(row label,
+    [(value, colour, alpha, hatch)])], the same rows in every column."""
+    w, h = st.PAPER_PANELS[size]
+    rows = [{p: rows_of(p) for p in platforms} for _, rows_of in columns]
+    platforms = [p for p in platforms
+                 if any(finite(v) and v > 0 for r in rows for _, bars in r[p] for v, _, _, _ in bars)]
+    if not platforms:
+        raise NoData("no values for %s" % name)
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(len(platforms), len(columns), height_ratios=[len(rows[0][p]) for p in platforms])
+    for c, (xlabel, _) in enumerate(columns):
+        axes, drawn = [], []
+        for i, platform in enumerate(platforms):
+            ax = fig.add_subplot(grid[i, c], sharex=axes[0] if axes else None)
+            axes.append(ax)
+            for y, (_, bars) in enumerate(rows[c][platform]):
+                n = len(bars)
+                for j, (v, color, alpha, hatch) in enumerate(bars):
+                    if not (finite(v) and v > 0):
+                        continue
+                    yy = y - 0.4 + 0.8 * (j + 0.5) / n
+                    ax.barh(yy, v, height=0.8 / n * 0.9, color=color, alpha=alpha, hatch=hatch,
+                            edgecolor="white" if hatch else "none", linewidth=0, zorder=3)
+                    ax.annotate(value_text(v), (v, yy), xytext=(1.5, 0), textcoords="offset points",
+                                ha="left", va="center", fontsize=st.SMALL_FONT, color=st.INK, zorder=4,
+                                annotation_clip=False)
+                    drawn.append(v)
+            ax.set_yticks(range(len(rows[c][platform])))
+            ax.set_yticklabels([label for label, _ in rows[c][platform]] if c == 0 else [])
+            ax.set_ylim(len(rows[c][platform]) - 0.5, -0.5)
+            ax.set_title(st.PLATFORM_LABEL[platform] if c == 0 or len(columns) == 1 else "")
+            ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
+            ax.set_axisbelow(True)
+            if i < len(platforms) - 1:
+                ax.tick_params(labelbottom=False)
+        if not drawn:
+            continue
+        lo, hi = min(drawn), max(drawn)
+        axes[0].set_xscale("log")
+        axes[0].set_xlim(lo / 2, hi * 8)
+        log_ticks(axes[0].xaxis, lo / 2, hi * 8)
+        axes[-1].set_xlabel(xlabel)
+    paper_title(fig, title)
+    return save(fig, ctx, name)
+
+
+def figB3_side(db, ctx, sample, ref):
+    """B3 (phase-block NG50, alone and with MethPhaser) as horizontal bars, a
+    narrow column beside A1 and A3."""
+    platforms = [p for p in st.PLATFORMS
+                 if any(db.has((ref, "truth", p, DEPTH, m)) for m in st.METH_PHASERS if st.applies(p, m))]
+
+    def rows_of(platform):
+        return [(st.PHASER_LABEL[ph],
+                 [(n50_mb(db, (ref, "truth", platform, DEPTH, ph)), st.PHASER_COLOR[ph], PALE, None),
+                  (n50_mb(db, (ref, "truth", platform, DEPTH, "mp" + ph)), st.PHASER_COLOR[ph], 1.0, None)])
+                for ph in phasers_on(platform) if db.has((ref, "truth", platform, DEPTH, "mp" + ph))]
+    return side_bars(ctx, fig_name("figB3_side_ng50", sample, ref), "meth_side",
+                     "Effect of DNA methylation integration on phase-block NG50",
+                     platforms, [("Phase-block NG50 (Mb)", rows_of)])
+
+
+def figC1_side(db, ctx, sample, ref, depth):
+    """Switch error rate and phase-block NG50 side by side as horizontal bars:
+    the read-based phasers on the truth input, then the trio assemblies - a
+    narrow column beside the chromosome figure of the switch errors."""
+    platforms = [p for p in st.PLATFORMS
+                 if any(db.has((ref, a, p, depth, "dipcall")) for a in ASSEMBLERS[1:])]
+
+    def rows(value):
+        def rows_of(platform):
+            out = [(st.PHASER_LABEL[ph], [(value(db, (ref, "truth", platform, depth, ph)), st.PHASER_COLOR[ph], 1.0, None)])
+                   for ph in phasers_on(platform)]
+            out += [(ASM_LABEL[a], [(value(db, (ref, a, platform, depth, "dipcall")), ASM_COLOR[a], 1.0, None)])
+                    for a in ASSEMBLERS[1:] if db.has((ref, a, platform, depth, "dipcall"))]
+            return out
+        return rows_of
+    return side_bars(ctx, fig_name("figC1_side_switch_ng50_%dx" % depth, sample, ref), "asm_side",
+                     "Alignment-based and assembly-based phasing: switch error rate and phase-block NG50",
+                     platforms, [("Switch error rate (%%), %d×" % depth, rows(switch_pct)),
+                                 ("Phase-block NG50 (Mb), %d×" % depth, rows(n50_mb))])
+
+
 # --------------------------------------------------------------------- main
 
 def samples_of(ctx):
@@ -510,6 +600,7 @@ def main():
                                            figB_metric, db, ctx, sample, ref, number, metric))
                     results.append(run("B %s %s LongPhase 5mC" % (sample, ref),
                                        figB5, db, ctx, sample, ref))
+                    results.append(run("B %s %s NG50 beside A" % (sample, ref), figB3_side, db, ctx, sample, ref))
         if "C" in only:
             db = Metrics(ctx.root, sample, st.REGION, readacc_rules=ctx.rules).load(
                 refs, ["truth"] + ASSEMBLERS, st.PLATFORMS, [ctx.asm_depth], st.PHASERS + ["dipcall"])
@@ -519,6 +610,8 @@ def main():
                 for number, (metric, with_hifiasm) in enumerate(c_metrics, 1):
                     results.append(run("C %s %s %s" % (sample, ref, metric[0]), figC_metric, db, ctx,
                                        sample, ref, number, metric, ctx.asm_depth, with_hifiasm))
+                results.append(run("C %s %s switch beside the chromosomes" % (sample, ref), figC1_side, db, ctx,
+                                   sample, ref, ctx.asm_depth))
     print("%d written, %d skipped for lack of data, %d failed -> %s" % (
         results.count("ok"), results.count("skip"), results.count("failed"), ctx.out))
     return 1 if "failed" in results else 0

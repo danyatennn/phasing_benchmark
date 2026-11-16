@@ -32,13 +32,13 @@ import math
 import numpy as np
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
+from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FixedLocator, MaxNLocator, NullLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator, NullLocator
 
 import style as st
-from bars import bar, group_ticks, label_bar, offsets, scale_axes
+from bars import bar, group_ticks, label_bar, offsets, scale_axes, value_text
 from data import NAN, TRUTH_SFX, ratio
 from figures import (NoData, SameDecimals, colorbar, empty_panel, finite, heatmap, log_norm, log_ticks,
                      matpat_recall, panel_row, panel_size, paper_title,
@@ -669,13 +669,36 @@ SAMPLE_METRICS = [
 ]
 
 
+def light(color, share=0.45):
+    """the colour mixed with white, so dark text on it reads"""
+    r, g, b = to_rgb(color)
+    return (r + (1 - r) * share, g + (1 - g) * share, b + (1 - b) * share)
+
+
+def tall_bottom(lo, top, log, share=0.6):
+    """the bottom of the axis that leaves the bars room for the name and the
+    value written inside them: on a log axis a decade and a half under the
+    smallest bar; on a linear one the smallest bar `share` of the axis height"""
+    if log:
+        return 10 ** math.floor(math.log10(lo / 30))
+    return max(0.0, math.floor((lo - share * top) / (1 - share)))
+
+
+def plain_tick(v, _=None):
+    """0.00001, 0.001, 0.1, 10 - never 1e-05"""
+    return ("%.10f" % v).rstrip("0").rstrip(".") if v < 1 else "%g" % v
+
+
 def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30, ref="GRCh38"):
     """The GIAB samples side by side at 30x on GRCh38: a panel per platform that
-    two samples or more were sequenced on, a group per phaser on the truth
-    input (or per caller), a bar per sample. Each sample is scored against its
-    own truth (HG002 v5.0q, HG005 v4.2.1, HG001 Platinum Pedigree v1.2), so a
-    difference is the sample and its truth together."""
+    two samples or more were sequenced on, a group per sample, a bar per phaser
+    on the truth input (or per caller), its name and value written inside it.
+    Each sample is scored against its own truth (HG002 v5.0q, HG005 v4.2.1,
+    HG001 Platinum Pedigree v1.2), so a difference is the sample and its truth
+    together."""
     series_all = st.PHASERS if by == "phaser" else [c for c in st.CALLERS if c != "truth"]
+    label_of = st.PHASER_LABEL if by == "phaser" else st.CALLER_LABEL
+    color_of = st.PHASER_COLOR if by == "phaser" else st.CALLER_COLOR
     _no_labels.clear()
 
     def val(sample, platform, s):
@@ -683,46 +706,56 @@ def samples_figure(dbs, ctx, name, value, ylabel, log, by, title=None, depth=30,
         return positive(v) if log else v
 
     has = lambda sample, platform: any(finite(val(sample, platform, s)) for s in series_all)
-    order = list(SAMPLE_COLOR)
-    samples = sorted((s for s in dbs if any(has(s, p) for p in st.PLATFORMS)),
-                     key=lambda s: (order.index(sample_label(s)) if sample_label(s) in order else len(order), s))
+    samples = sorted((s for s in dbs if any(has(s, p) for p in st.PLATFORMS)), key=sample_label)
     shown = [sample_label(s) for s in samples]
     if len(set(shown)) < len(shown):
         raise NoData("two sample folders shown as one name (%s) - pick one with --samples" % " ".join(samples))
     platforms = [p for p in st.PLATFORMS if sum(has(s, p) for s in samples) >= 2]
     if not platforms:
         raise NoData("no platform with two samples at %dx" % depth)
-    others = iter(SAMPLE_SHADES * len(samples))
-    color = {s: SAMPLE_COLOR[sample_label(s)] if sample_label(s) in SAMPLE_COLOR else next(others) for s in samples}
-    fig, legend_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 12)
-    xs, w = offsets(len(samples))
-    drawn = []
-    for ax, platform in zip(axes, platforms):
-        series = [s for s in series_all if by != "phaser" or st.applies(platform, s)]
-        for x, s in enumerate(series):
-            for dx, sample in zip(xs, samples):
-                v = bar(ax, x + dx, val(sample, platform, s), w, color[sample])
-                if v is not None:
-                    drawn.append(v)
-                    label_bar(ax, x + dx, v, w)
-        group_ticks(ax, [st.PHASER_LABEL[s] if by == "phaser" else st.CALLER_LABEL[s] for s in series])
-        ax.set_title(st.PLATFORM_LABEL[platform])
+    bars = []                       # (ax, x, value, width, series)
+    values = [val(s, p, x) for p in platforms for s in samples for x in series_all]
+    drawn = [v for v in values if finite(v)]
     if not drawn:
-        plt.close(fig)
         raise NoData("no values for any sample at %dx" % depth)
-    scale_axes(axes, drawn, log, "%s, %d×" % (ylabel, depth))
-    if "read_recall" in name:
-        # zoomed on the bars so the differences show, as the recall panels of A-C; no tick over 100%
-        lo, hi = min(drawn), max(drawn)
-        span = max(hi - lo, 1.0)
-        bottom, top = max(0.0, lo - 0.15 * span), hi + 0.35 * span
-        axes[0].set_ylim(bottom, top)
-        axes[0].set_yticks([v for v in MaxNLocator(5).tick_values(bottom, min(top, 100)) if bottom <= v <= 100])
     dagger = {s for s in samples if dbs[s].sample_root in _no_labels}
-    top_legend(legend_ax, [Patch(color=color[s], label=sample_label(s) + ("$^\\dagger$" if s in dagger else ""))
-                           for s in samples],
-               title="$^\\dagger$reads against whatshap haplotag with the phased truth VCF (no parental labels)"
-               if dagger else None)
+    fig, note_ax, axes = panel_row(len(platforms), height=st.PANEL_HEIGHT + 20,
+                                   legend="bottom" if dagger else None)
+    for ax, platform in zip(axes, platforms):
+        series = [x for x in series_all if by != "phaser" or st.applies(platform, x)]
+        xs, w = offsets(len(series))
+        here = [s for s in samples if has(s, platform)]
+        for g, sample in enumerate(here):
+            for dx, x in zip(xs, series):
+                v = bar(ax, g + dx, val(sample, platform, x), w, light(color_of[x]))
+                if v is not None:
+                    bars.append((ax, g + dx, v, x))
+        ax.set_xticks(range(len(here)))
+        ax.set_xticklabels([sample_label(s) + ("$^\\dagger$" if s in dagger else "") for s in here],
+                           fontweight="bold")
+        ax.set_xlim(-0.55, len(here) - 0.45)
+        ax.set_title(st.PLATFORM_LABEL[platform])
+    lo, hi = min(drawn), max(drawn)
+    top = hi * 1.3 if log else min(100.0, hi + 0.05 * max(hi, 1)) if "recall" in name else hi * 1.05
+    bottom = tall_bottom(lo, top, log)
+    if log:
+        axes[0].set_yscale("log")
+        log_ticks(axes[0].yaxis, bottom, top)
+        axes[0].yaxis.set_major_formatter(FuncFormatter(plain_tick))
+    axes[0].set_ylim(bottom, top)
+    axes[0].set_ylabel("%s, %d×" % (ylabel, depth))
+    for ax in axes:
+        ax.grid(axis="y", color=st.GRID, linewidth=0.5, zorder=0)
+        ax.set_axisbelow(True)
+    # inside each bar: the name at its foot, the value at its top, both turned
+    for ax, x, v, s in bars:
+        ax.annotate(label_of[s], (x, bottom), xytext=(0, 2), textcoords="offset points", rotation=90,
+                    ha="center", va="bottom", fontsize=st.SMALL_FONT, color=st.INK, zorder=4)
+        ax.annotate(value_text(v), (x, v), xytext=(0, -2), textcoords="offset points", rotation=90,
+                    ha="center", va="top", fontsize=st.SMALL_FONT, color=st.INK, zorder=4, fontweight="bold")
+    if dagger:
+        note_ax.text(0.5, 0.5, "$^\\dagger$reads against whatshap haplotag with the phased truth VCF (no parental labels)",
+                     ha="center", va="center", transform=note_ax.transAxes)
     paper_title(fig, title)
     return save(fig, ctx, "%s_%dx_%s" % (name, depth, ref))
 

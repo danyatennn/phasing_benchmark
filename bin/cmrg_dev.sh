@@ -18,12 +18,14 @@
 #   CMRG_REF=CHM13v1 bash bin/cmrg_dev.sh truth            (minutes; CMRG_INPUT=truth on CHM13v1: dipcall, hours)
 #   CMRG_REF=GRCh38 CMRG_JOBS=6 bash bin/cmrg_dev.sh phase truth input, every platform x phaser
 #   CMRG_REF=GRCh38 bash bin/cmrg_dev.sh eval
+#   CMRG_REF=GRCh38 bash bin/cmrg_dev.sh tags              reads of the genes haplotagged (benchmark, every run)
+#   bash bin/cmrg_dev.sh reads                             read recall, consensus labels, reads anchored on v1.0 (after tags on both)
 #
 # Written to cmrg_dev/<ref>/bam/ (CHM13v1) and cmrg_dev/<ref>/<input>/: truth/, phased/, logs/, eval/.
 
 set -euo pipefail
 
-STEP="${1:?step: ref, align, truth, phase or eval}"
+STEP="${1:?step: ref, align, truth, phase, eval, tags or reads}"
 CMRG_REF="${CMRG_REF:-GRCh38}"
 CMRG_INPUT="${CMRG_INPUT:-cmrg}"
 [[ "${CMRG_INPUT}" == cmrg || "${CMRG_INPUT}" == truth ]] || { echo "CMRG_INPUT must be cmrg or truth" >&2; exit 1; }
@@ -190,5 +192,50 @@ eval)
   log "-> ${D}/eval/cmrg_${CMRG_REF}.tsv, .genes.tsv"
   ;;
 
-*) die "unknown step ${STEP}: ref, align, truth, phase or eval" ;;
+tags)
+  # the reads of the genes (primary alignments), haplotagged with the benchmark
+  # and with every run, for the read recall of the reads step
+  genes="${D}/eval/genes.bed"
+  require_file "${genes}" "gene BED (run the eval step)"
+  R="${D}/reads"
+  mkdir -p "${R}"
+  for p in "${PLATFORMS[@]}"; do
+    if [[ "${CMRG_REF}" == CHM13v1 ]]; then bam="${B}/${p}.bam"; else bam="$(sub_bam "${p}" GRCh38 "${DEPTH}")"; fi
+    require_file "${bam}" "30x BAM of ${p}"
+    if [[ ! -s "${R}/${p}.bam.bai" ]]; then
+      "${SAMTOOLS}" view -b -F 0x904 -M -L "${genes}" -o "${R}/${p}.bam" "${bam}"
+      "${SAMTOOLS}" index "${R}/${p}.bam"
+    fi
+    # name, chrom, start, end of each alignment (end from the CIGAR)
+    "${SAMTOOLS}" view "${R}/${p}.bam" | awk -F'\t' -v OFS='\t' '{ n = 0; c = $6
+        while (match(c, /[0-9]+[MDN=X]/)) { n += substr(c, RSTART, RLENGTH - 1); c = substr(c, RSTART + RLENGTH) }
+        print $1, $3, $4 - 1, $4 - 1 + n }' >"${R}/${p}.aln.tsv"
+    log "${CMRG_REF} ${p}: $(wc -l <"${R}/${p}.aln.tsv") reads in the genes, haplotagging"
+    "${WHATSHAP}" haplotag --reference "${CREF}" --sample "${SAMPLE}" --ignore-read-groups --skip-missing-contigs \
+        --output-haplotag-list "${R}/${p}.truth.tsv" -o /dev/null "${TRUTH_P}" "${R}/${p}.bam" >"${R}/${p}.truth.log" 2>&1
+    for vcf in "${D}"/phased/"${p}"_*_truth_*.vcf.gz; do
+      name="$(basename "${vcf}" .vcf.gz)"
+      "${WHATSHAP}" haplotag --reference "${CREF}" --sample "${SAMPLE}" --ignore-read-groups --skip-missing-contigs \
+          --output-haplotag-list "${R}/${name}.tags.tsv" -o /dev/null "${vcf}" "${R}/${p}.bam" >"${R}/${name}.log" 2>&1 \
+        || warn "haplotag failed for ${name}, see ${R}/${name}.log"
+    done
+  done
+  ;;
+
+reads)
+  # both references at once, anchored on T2T-CHM13 v1.0 (its reads are those of
+  # the T2T-CHM13 30x cell, realigned): their consensus labels, and a primary
+  # alignment in the GRCh38 30x cell too (its read table)
+  lab=()
+  for p in "${PLATFORMS[@]}"; do
+    f="${READS_DIR}/$(bam_key "${p}" T2T "${DEPTH}").consensus.tsv.gz"
+    q="${READS_DIR}/$(bam_key "${p}" GRCh38 "${DEPTH}").reads.tsv.gz"
+    if [[ -s "${f}" && -s "${q}" ]]; then lab+=(--labels "${p}=${f}" --require "${p}=${q}"); else warn "${p}: no ${f} or ${q}"; fi
+  done
+  "${PLOTS_PYTHON}" "${PROJECT_ROOT}/plots/cmrg_reads.py" "${lab[@]}" \
+      --anchor "CHM13v1=${OUT}/CHM13v1/${CMRG_INPUT}" --other "GRCh38=${OUT}/GRCh38/${CMRG_INPUT}" \
+      --out "${OUT}/cmrg_reads_${CMRG_INPUT}"
+  ;;
+
+*) die "unknown step ${STEP}: ref, align, truth, phase, eval, tags or reads" ;;
 esac
