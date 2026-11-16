@@ -128,7 +128,7 @@ SMALL_WIDTH = 56  # mm, a third of the page (Fig. 1d, 1e)
 # Fig. 3: a, b, c, d one under the other, across the page.
 PAPER_PANELS = {
     "heatmap": (110, 64),          # Fig. 1b, figS2b, one per reference
-    "regions": (60, 128),          # Fig. 1c, figR2, as high as the two heatmaps
+    "regions": (66, 86),           # figR2, beside the heatmap of the switch errors by region
     "small": (SMALL_WIDTH, 56),    # Fig. 1e fig6b/fig6d by platform
     "fig1d": (SMALL_WIDTH, 62),    # Fig. 1d fig6e, the phaser legend under it
     "fig3": (122, 80),             # Fig. 2a, both references
@@ -148,15 +148,16 @@ PAPER_PANELS = {
     "experiment_narrow_legend": (130, 50),  # figA3, the legend under it
     "experiment_grid": (130, 70),           # two platforms to a row (needs ~70 mm a metric)
     "experiment_grid_legend": (130, 76),
-    "meth_side": (36, 96),                  # figB3_side, as high as A1 + A3
+    "meth_side": (38, 96),                  # figB3_side, as high as A1 + A3
     # the assemblies against the phasers beside the chromosome figure of the
     # switch errors (assembly gaps)
     "asm_side": (52, 128),                  # figC1_side: switch | NG50, phasers on truth and on hifiasm SNPs, 4 platforms
     # Fig. 2 (the page with the chromosome figure): b and c, side by side
     "samples_paper": (83, 34),              # fig9a/fig9b of ONT 5 kHz, the three samples
     # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
-    "r7_small": (60, 52),
-    "meth_scatter": (68, 52),               # figB6: switch vs NG50 with/without methylation, Fig. 3c
+    "r7_small": (52, 44),                   # beside Fig. 1d, between the heatmap and the GIAB samples
+    "meth_scatter": (46, 108),              # figB6: the platforms one over the other, as high as the region view + B5
+    "meth_longphase": (121, 46),            # figB5, under the region view of the methylation figure
     # the read page, 225 mm: R5 | R3c, fig10d | R20 (~110 as placed), U2 | T3 (56), U1 (48), gaps
     "upset_crossref": (PAGE_WIDTH, 48),     # figU1: reads of a stratum on the other reference
     "upset_labels": (92, 56),               # figU2: the three parental labelling methods

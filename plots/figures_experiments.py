@@ -196,7 +196,7 @@ PAPER = {
     "figB1": ("experiment_meth", False, "Effect of DNA methylation integration on switch error rate"),
     "figB3": ("experiment_meth", False, "Effect of DNA methylation integration on phase-block NG50"),
     "figB4": ("experiment_meth_legend", True, "Effect of DNA methylation integration on read haplotagging recall"),
-    "figB5": ("experiment_legend", True, "MethPhaser and LongPhase 5mC mode (modcall) on LongPhase"),
+    "figB5": ("meth_longphase", True, "Effects of methylation-assisted phasing on accuracy and continuity"),
 }
 
 
@@ -371,6 +371,8 @@ def figB_metric(db, ctx, sample, ref, number, metric):
                           metric, platforms, bars_of, legend, PAPER.get("figB%d" % number))
 
 
+# B5 is all LongPhase: a lighter blue of its hue than its own, on a small panel
+LONGPHASE_LIGHT = "#4A7FB5"
 LONGPHASE_METH = [("longphase", PALE, None, "LongPhase alone"),
                   ("mplongphase", 1.0, None, "LongPhase + MethPhaser"),
                   ("lpmod", 1.0, "////", "LongPhase + 5mC (modcall)")]
@@ -391,7 +393,7 @@ def figB5(db, ctx, sample, ref):
     metrics = METRICS_B[:3]          # switch, Hamming, NG50: no read recall
     grid = fig.add_gridspec(2, len(metrics), height_ratios=[1, 0.1])
     xs, bw = offsets(len(LONGPHASE_METH))
-    color = st.PHASER_COLOR["longphase"]
+    color = LONGPHASE_LIGHT
     drawn_any = False
     for i, (tag, ylabel, value, log) in enumerate(metrics):
         ax = fig.add_subplot(grid[0, i])
@@ -417,8 +419,8 @@ def figB5(db, ctx, sample, ref):
         raise NoData("no LongPhase methylation values of %s on %s" % (sample, ref))
     legend_ax = fig.add_subplot(grid[1, :])
     legend_ax.axis("off")
-    top_legend(legend_ax, legend_patches([(label, alpha, hatch)
-                                          for _, alpha, hatch, label in LONGPHASE_METH]))
+    top_legend(legend_ax, [Patch(facecolor=color, alpha=alpha, hatch=hatch, edgecolor="white" if hatch else "none",
+                                 label=label) for _, alpha, hatch, label in LONGPHASE_METH])
     paper_title(fig, title)
     return save(fig, ctx, fig_name("figB5_longphase_methylation", sample, ref))
 
@@ -434,8 +436,8 @@ def log_ticks_13(axis, lo, hi):
 
 def figB6_scatter(db, ctx, sample, ref):
     """Switch error rate against phase-block NG50 with and without DNA
-    methylation, ONT 5 kHz and PacBio Revio side by side, each with its own
-    axes. A phaser has its own marker and colour: open alone, an arrow to the
+    methylation, ONT 5 kHz over PacBio Revio, each with its own axes, a tall
+    narrow column beside the region view and B5. A phaser has its own marker and colour: open alone, an arrow to the
     filled + MethPhaser point; LongPhase in its own 5mC mode is a star at the
     end of a dotted arrow. The switch axis runs from more to fewer errors, so
     the top right corner is best."""
@@ -445,10 +447,10 @@ def figB6_scatter(db, ctx, sample, ref):
         raise NoData("no MethPhaser runs of %s on %s" % (sample, ref))
     w, h = st.PAPER_PANELS["meth_scatter"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, len(platforms), height_ratios=[1, 0.2])
+    grid = fig.add_gridspec(len(platforms) + 1, 1, height_ratios=[1] * len(platforms) + [0.3])
     shown = []
     for i, platform in enumerate(platforms):
-        ax = fig.add_subplot(grid[0, i])
+        ax = fig.add_subplot(grid[i, 0])
         xs, ys = [], []
         for ph in phasers_on(platform):
             k0 = (ref, "truth", platform, DEPTH, ph)
@@ -491,13 +493,12 @@ def figB6_scatter(db, ctx, sample, ref):
             ax.yaxis.set_major_locator(FixedLocator([float("%.2g" % min(ys)), float("%.2g" % max(ys))]))
         ax.grid(color=st.GRID, linewidth=0.5)
         ax.set_axisbelow(True)
-        ax.set_xlabel("Switch error rate (%,\nlower to the right)")
-        if i == 0:
-            ax.set_ylabel("Phase-block NG50 (Mb)")
+        ax.set_xlabel("Switch error rate (%)")
+        ax.set_ylabel("Phase-block NG50 (Mb)")
     if not shown:
         plt.close(fig)
         raise NoData("no switch rates of the MethPhaser runs of %s on %s" % (sample, ref))
-    legend_ax = fig.add_subplot(grid[1, :])
+    legend_ax = fig.add_subplot(grid[len(platforms), 0])
     legend_ax.axis("off")
     handles = [Line2D([], [], marker=st.PHASER_MARKER[ph], linestyle="none", markersize=3,
                       color=st.PHASER_COLOR[ph], markeredgecolor="white", markeredgewidth=0.3,
@@ -506,8 +507,8 @@ def figB6_scatter(db, ctx, sample, ref):
                        markeredgecolor=st.MUTED, label="Alone"),
                 Line2D([], [], marker="o", linestyle="none", markersize=3, color=st.MUTED, label="+ MethPhaser"),
                 Line2D([], [], marker="*", linestyle="none", markersize=5, color=st.MUTED, label="LongPhase + 5mC")]
-    legend_ax.legend(handles=handles, loc="center", ncol=4, borderaxespad=0, columnspacing=0.7,
-                     handletextpad=0.1, handlelength=1.0, frameon=False, fontsize=st.SMALL_FONT)
+    legend_ax.legend(handles=handles, loc="center", ncol=2, borderaxespad=0, columnspacing=0.8,
+                     handletextpad=0.2, handlelength=1.0, labelspacing=0.3, frameon=False)
     paper_title(fig, "Switch error rate and NG50 with and without methylation")
     return save(fig, ctx, fig_name("figB6_meth_scatter", sample, ref))
 
@@ -565,12 +566,15 @@ def figC_metric(db, ctx, sample, ref, number, metric, depth, with_hifiasm):
 
 # ------------------------------------------- horizontal bars, beside a figure
 
-def side_bars(ctx, name, size, title, platforms, columns):
+def side_bars(ctx, name, size, title, platforms, columns, legend=None, xmax=None):
     """Horizontal bars on log x axes for a narrow column beside another figure:
     a row of panels per platform (each as tall as its rows), a column per
     metric with its own x axis, the row labels on the first column only.
     columns: [(x label, rows_of)], rows_of(platform) -> [(row label,
-    [(value, colour, alpha, hatch)])], the same rows in every column."""
+    [(value, colour, alpha, hatch)])], the same rows in every column.
+    legend: [(label, alpha, hatch)] in a strip under the panels; xmax: the
+    right end of the x axes (default 8 times the largest value; at least 1.6
+    times it)."""
     w, h = st.PAPER_PANELS[size]
     rows = [{p: rows_of(p) for p in platforms} for _, rows_of in columns]
     platforms = [p for p in platforms
@@ -578,7 +582,9 @@ def side_bars(ctx, name, size, title, platforms, columns):
     if not platforms:
         raise NoData("no values for %s" % name)
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(len(platforms), len(columns), height_ratios=[len(rows[0][p]) for p in platforms])
+    ratios = [len(rows[0][p]) for p in platforms]
+    grid = fig.add_gridspec(len(platforms) + bool(legend), len(columns),
+                            height_ratios=ratios + [0.07 * sum(ratios) * len(legend)] if legend else ratios)
     # the value labels: 5 pt where a bar is 2.2 mm high or more and the column 20 mm wide, else 4 pt
     n_rows = sum(len(rows[0][p]) for p in platforms)
     n_bars = max(len(bars) for p in platforms for _, bars in rows[0][p])
@@ -612,10 +618,17 @@ def side_bars(ctx, name, size, title, platforms, columns):
         if not drawn:
             continue
         lo, hi = min(drawn), max(drawn)
+        # xmax: room for the value labels kept, should a value come near it
+        right = max(xmax, hi * 1.6) if xmax else hi * 8
         axes[0].set_xscale("log")
-        axes[0].set_xlim(lo / 2, hi * 8)
-        log_ticks(axes[0].xaxis, lo / 2, hi * 8)
-        if w / len(columns) <= 30:
+        axes[0].set_xlim(lo / 2, right)
+        log_ticks(axes[0].xaxis, lo / 2, right)
+        if xmax:
+            # a short axis: the ticks that fit, so its right end is labelled
+            ticks = [t for t in (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10) if lo / 2 <= t <= right]
+            axes[0].xaxis.set_major_locator(FixedLocator(ticks))
+            axes[0].xaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
+        elif w / len(columns) <= 30:
             # a narrow column: decades only, every other one when there are many
             first, last = math.ceil(math.log10(lo / 2)), math.floor(math.log10(hi * 8))
             ticks = [10.0 ** k for k in range(first, last + 1)]
@@ -623,6 +636,11 @@ def side_bars(ctx, name, size, title, platforms, columns):
             axes[0].xaxis.set_major_locator(FixedLocator(ticks))
             axes[0].xaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % v))
         axes[-1].set_xlabel(xlabel)
+    if legend:
+        legend_ax = fig.add_subplot(grid[len(platforms), :])
+        legend_ax.axis("off")
+        legend_ax.legend(handles=legend_patches(legend), loc="center", ncol=1, borderaxespad=0,
+                         handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
     paper_title(fig, title)
     return save(fig, ctx, name)
 
@@ -640,7 +658,8 @@ def figB3_side(db, ctx, sample, ref):
                 for ph in phasers_on(platform) if db.has((ref, "truth", platform, DEPTH, "mp" + ph))]
     return side_bars(ctx, fig_name("figB3_side_ng50", sample, ref), "meth_side",
                      "Effect of DNA methylation integration on phase-block NG50",
-                     platforms, [("Phase-block NG50 (Mb)", rows_of)])
+                     platforms, [("Phase-block NG50 (Mb)", rows_of)],
+                     legend=[("Phasing method alone", PALE, None), ("+ MethPhaser", 1.0, None)], xmax=2)
 
 
 def figC1_side(db, ctx, sample, ref, depth):

@@ -474,16 +474,17 @@ def fig_r7(ctx):
 
 
 def r7_small(ctx, phaser, ref, start, end):
-    """R7 of one phaser on one reference, the size of Fig. 1c: an arrow per
-    platform from genome-wide (open) to the stratum (filled); the platform
-    colours are those of the legend of Fig. 1d, so only open/filled is told."""
+    """R7 of one phaser on one reference, Fig. 1e: an arrow per platform from
+    genome-wide (open) to the stratum (filled); the platforms and open/filled
+    in the legend under the plot. The switch axis runs from more to fewer
+    errors, so the top right corner is best."""
     w, h = st.PAPER_PANELS["r7_small"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.13])
+    grid = fig.add_gridspec(2, 1, height_ratios=[1, 0.2])
     ax = fig.add_subplot(grid[0, 0])
     legend_ax = fig.add_subplot(grid[1, 0])
     legend_ax.axis("off")
-    xs, ys = [], []
+    xs, ys, shown = [], [], []
     for p in st.PLATFORMS:
         k = (ref, phaser, p)
         if k not in start or k not in end:
@@ -492,6 +493,7 @@ def r7_small(ctx, phaser, ref, start, end):
         xs += [v for v in (x0, x1) if v == v and v > 0]
         ys += [v for v in (y0, y1) if v == v]
         c, m = st.PLATFORM_COLOR[p], st.PLATFORM_MARKER[p]
+        shown.append(p)
         ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
                     arrowprops=dict(arrowstyle="-|>", color=c, linestyle=(0, (3, 2)),
                                     linewidth=0.8, shrinkA=3, shrinkB=3, mutation_scale=6))
@@ -508,17 +510,22 @@ def r7_small(ctx, phaser, ref, start, end):
     ylo, yhi = min(ys), max(ys)
     pad = 0.08 * (yhi - ylo or 1)
     ax.set_ylim(ylo - pad, min(100.5, yhi + pad))
-    ax.set_xlabel("Switch error rate (%, lower to the right)")
+    ax.set_xlabel("Switch error rate (%)")
     ax.set_ylabel("Truth het SNPs phased (%)")
     ax.grid(color=st.GRID, linewidth=0.5)
     ax.set_axisbelow(True)
-    top_legend(legend_ax, [Line2D([], [], marker="o", linestyle="none", markerfacecolor="white",
-                                  markeredgecolor=st.MUTED, markeredgewidth=1.0, label="Genome-wide"),
-                           Line2D([], [], marker="o", linestyle="none", color=st.MUTED, markeredgecolor="white",
-                                  label=stratum_label(ctx.stratum).replace("\n", " "))], ncol=2)
-    paper_title(fig, "%s: genome-wide to %s on %s" % (st.PHASER_LABEL[phaser],
-                                                      stratum_label(ctx.stratum).replace("\n", " ").lower(),
-                                                      st.REFERENCE_LABEL[ref]))
+    # two rows, filled column by column: ONT, PacBio (short names, the panel
+    # is narrow), then open and filled
+    short = {"hifi": "Sequel II", "revio": "Revio"}
+    platforms = [series_handle(st.PLATFORM_COLOR[p], st.PLATFORM_MARKER[p], short.get(p, st.PLATFORM_LABEL[p]),
+                               line=False) for p in shown]
+    ends = [Line2D([], [], marker="o", linestyle="none", markerfacecolor="white",
+                   markeredgecolor=st.MUTED, markeredgewidth=1.0, label="Genome-wide"),
+            Line2D([], [], marker="o", linestyle="none", color=st.MUTED, markeredgecolor="white",
+                   label=stratum_label(ctx.stratum).replace("\n", " ").replace(" regions", ""))]
+    legend_ax.legend(handles=platforms + ends, loc="center", ncol=(len(platforms) + 3) // 2, borderaxespad=0,
+                     handletextpad=0.1, columnspacing=0.6, labelspacing=0.3)
+    paper_title(fig, "Phasing performance in genome-wide and difficult regions")
     return save(fig, ctx, "figR7_difficult_drop_%s_%s_small" % (phaser, ref))
 
 

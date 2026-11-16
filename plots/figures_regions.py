@@ -242,9 +242,11 @@ def fig_tagged(ctx, db, ref):
         ax.tick_params(axis="y", length=0)
         if n % ncols:
             ax.tick_params(labelleft=False)
-        # the x label once per row of panels would repeat; it goes on the last row
+        # the x label and the tick numbers once, on the last row: the panels share x
         if n // ncols == nrows - 1 or n + ncols >= len(regions):
             ax.set_xlabel("Haplotagged %s (%%)" % ("reads" if ctx.unit == "reads" else "read bases"))
+        else:
+            ax.tick_params(labelbottom=False)
 
     legend_ax.legend(handles=[Patch(color=st.PLATFORM_COLOR[p], label=st.PLATFORM_LABEL[p])
                               for p in platforms],
