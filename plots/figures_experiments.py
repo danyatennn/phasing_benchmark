@@ -645,21 +645,21 @@ def figB3_side(db, ctx, sample, ref):
 
 def figC1_side(db, ctx, sample, ref, depth):
     """Switch error rate and phase-block NG50 side by side as horizontal bars:
-    the read-based phasers on the truth input, then the trio assemblies - a
-    narrow column beside the chromosome figure of the switch errors."""
+    each read-based phaser on the truth SNPs (light) and on the SNPs of the
+    hifiasm assembly without parents (dark) - a narrow column beside the
+    chromosome figure of the switch errors."""
     platforms = [p for p in st.PLATFORMS
-                 if any(db.has((ref, a, p, depth, "dipcall")) for a in ASSEMBLERS[1:])]
+                 if any(db.has((ref, "hifiasm", p, depth, ph)) for ph in phasers_on(p))]
 
     def rows(value):
         def rows_of(platform):
-            out = [(st.PHASER_LABEL[ph], [(value(db, (ref, "truth", platform, depth, ph)), st.PHASER_COLOR[ph], 1.0, None)])
-                   for ph in phasers_on(platform)]
-            out += [(ASM_LABEL[a], [(value(db, (ref, a, platform, depth, "dipcall")), ASM_COLOR[a], 1.0, None)])
-                    for a in ASSEMBLERS[1:] if db.has((ref, a, platform, depth, "dipcall"))]
-            return out
+            return [(st.PHASER_LABEL[ph],
+                     [(value(db, (ref, "truth", platform, depth, ph)), st.PHASER_COLOR[ph], PALE, None),
+                      (value(db, (ref, "hifiasm", platform, depth, ph)), st.PHASER_COLOR[ph], 1.0, None)])
+                    for ph in phasers_on(platform) if db.has((ref, "hifiasm", platform, depth, ph))]
         return rows_of
     return side_bars(ctx, fig_name("figC1_side_switch_ng50_%dx" % depth, sample, ref), "asm_side",
-                     "Alignment-based and assembly-based phasing, %d×" % depth,
+                     "Phasers on the truth SNPs (light) and on the hifiasm SNPs (dark), %d×" % depth,
                      platforms, [("Switch error\nrate (%)", rows(switch_pct)),
                                  ("Phase-block\nNG50 (Mb)", rows(n50_mb))])
 
