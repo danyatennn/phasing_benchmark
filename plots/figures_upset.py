@@ -67,13 +67,13 @@ def draw_upset(fig, bar_cell, dot_cell, combos, values, ranges, colors, sets, se
         bar_ax.annotate(pct(v), (x, r[1] if r else v), xytext=(0, 1.5), textcoords="offset points",
                         ha="center", va="bottom", fontsize=st.SMALL_FONT, fontweight="bold", zorder=5)
     # brackets over the groups, their total on top
-    y = top * 1.2
+    y = top * 1.14
     for first, last, text in groups:
         bar_ax.plot([first - 0.3, first - 0.3, last + 0.3, last + 0.3], [y * 0.97, y, y, y * 0.97],
                     color=st.MUTED, linewidth=0.6, clip_on=False)
         bar_ax.text((first + last) / 2, y * 1.02, text, ha="center", va="bottom", fontsize=st.SMALL_FONT)
     if sharey is None:
-        bar_ax.set_ylim(0, top * 1.45)
+        bar_ax.set_ylim(0, top * 1.3)
     bar_ax.set_xlim(-0.6, len(combos) - 0.4)
     bar_ax.set_xticks([])
     bar_ax.spines["bottom"].set_visible(False)
@@ -95,7 +95,7 @@ def draw_upset(fig, bar_cell, dot_cell, combos, values, ranges, colors, sets, se
         for i, s in enumerate(sets):
             on = i in ys
             color = (set_color[s] if len(ys) == 1 else DOT_ON) if on else DOT_OFF
-            dot_ax.plot(x, i, "o", markersize=3.6, color=color, markeredgewidth=0, zorder=3)
+            dot_ax.plot(x, i, "o", markersize=3.2, color=color, markeredgewidth=0, zorder=3)
     dot_ax.set_xlim(-0.6, len(combos) - 0.4)
     dot_ax.set_ylim(len(sets) - 0.5, -0.5)
     dot_ax.set_yticks(range(len(sets)))
@@ -134,15 +134,15 @@ def fig_crossref(ctx):
     combos = stay + away
     w, h = st.PAPER_PANELS["upset_crossref"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(3, len(DIRECTIONS), height_ratios=[2.4, 0.9, 0.22])
+    grid = fig.add_gridspec(3, len(DIRECTIONS), height_ratios=[2.2, 0.9, 0.2])
     first_ax = None
     for i, (direction, title) in enumerate(DIRECTIONS):
         d = share.get(direction, {})
         values = [mean(d, c) for c in combos]
         ranges = [(min(d[c].values()), max(d[c].values())) if d.get(c) else None for c in combos]
         colors = [LIGHT if "same" in c else DARK for c in combos]
-        groups = [(0, len(stay) - 1, "Same stratum\n%s%%" % pct(sum(values[:len(stay)]))),
-                  (len(stay), len(combos) - 1, "Elsewhere\n%s%%" % pct(sum(values[len(stay):])))]
+        groups = [(0, len(stay) - 1, "Same stratum: %s%%" % pct(sum(values[:len(stay)]))),
+                  (len(stay), len(combos) - 1, "Elsewhere: %s%%" % pct(sum(values[len(stay):])))]
         ax = draw_upset(fig, grid[0, i], grid[1, i], combos, values, ranges, colors, CROSS_SETS, CROSS_LABEL, CROSS_SET_COLOR,
                         groups, "Reads of the stratum (%)", show_sets=(i == 0), title=title, sharey=first_ax)
         first_ax = first_ax or ax
@@ -198,11 +198,11 @@ def fig_labels(ctx):
     groups, start = [], 0
     for g, name in zip(by_n, ("All three", "Two methods", "One method")):
         end = start + len(g) - 1
-        groups.append((start, end, "%s\n%s%%" % (name, pct(sum(values[start:end + 1])))))
+        groups.append((start, end, "%s%s%s%%" % (name, ": " if end > start else "\n", pct(sum(values[start:end + 1])))))
         start = end + 1
     w, h = st.PAPER_PANELS["upset_labels"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(3, 1, height_ratios=[2.4, 0.9, 0.22])
+    grid = fig.add_gridspec(3, 1, height_ratios=[2.2, 0.9, 0.2])
     draw_upset(fig, grid[0, 0], grid[1, 0], combos, values, ranges, colors, LABEL_SETS, LABEL_NAME, LABEL_SET_COLOR,
                groups, "Labelled reads (%)", hatched=hatched)
     legend_ax = fig.add_subplot(grid[2, 0])

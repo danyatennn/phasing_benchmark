@@ -93,7 +93,7 @@ def runtime_mirror(ctx, path, ref, chrom):
         raise NoData("no runs in %s - run RUNTIME_CHROM=%s bin/runtime_run.sh" % (path, chrom))
     w, h = st.PAPER_PANELS["runtime_mirror"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
-    grid = fig.add_gridspec(3, 1, height_ratios=[1, 1, 0.14], hspace=0)
+    grid = fig.add_gridspec(3, 1, height_ratios=[1, 1, 0.24], hspace=0)
     up = fig.add_subplot(grid[0, 0])
     down = fig.add_subplot(grid[1, 0], sharex=up)
     phasers = [ph for ph in st.PHASERS if any(k[1] == ph for k in rows)]
@@ -129,8 +129,8 @@ def runtime_mirror(ctx, path, ref, chrom):
     legend_ax.axis("off")
     from matplotlib.patches import Patch
     legend_ax.legend(handles=[Patch(color=st.PHASER_COLOR[ph], label=st.PHASER_LABEL[ph]) for ph in phasers],
-                     loc="center", ncol=len(phasers), borderaxespad=0, frameon=False, columnspacing=1.0)
-    paper_title(fig, "Run time and peak memory of the phasers, %s, 30×, one thread, %s"
+                     loc="center", ncol=3, borderaxespad=0, frameon=False, columnspacing=1.0)
+    paper_title(fig, "Run time and peak memory, %s, 1 thread, %s"
                 % (chrom, st.REFERENCE_LABEL[ref]))
     return save(fig, ctx, "figT3_runtime_memory_%s_%s" % (chrom, ref))
 
