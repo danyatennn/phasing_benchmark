@@ -42,6 +42,9 @@ C  assemblies (dipcall_run.sh) next to the read-based phasers on the truth
      figC4_reads_wrong_matpat_...    tagged reads on the wrong parental haplotype
      figC5_reads_missed_matpat_...   labelled reads not tagged to their parental
                                      haplotype (Q100 labels, Metrics.matpat)
+     figC1_side_switch_ng50_...      the phasers on the truth SNPs and on the
+                                     hifiasm SNPs, horizontal bars
+     figC6_switch_ng50_...           the same as switch rate against NG50, as B6
 
 HG002 files carry the reference only; another sample's carry its name too
 (figA1_switch_HG001_GRCh38).
@@ -687,6 +690,84 @@ def figC1_side(db, ctx, sample, ref, depth):
                      legend=[("Truth SNPs", PALE, None), ("hifiasm SNPs", 1.0, None)])
 
 
+def figC6_scatter(db, ctx, sample, ref, depth):
+    """Switch error rate against phase-block NG50, the read-based phasers on
+    the truth SNPs and on the SNPs of the hifiasm assembly without parents, as
+    B6: a panel per platform, each with its own axes, a phaser in its own
+    marker and colour, open on the truth SNPs, an arrow to the filled point on
+    the hifiasm SNPs. The switch axis runs from more to fewer errors, so the
+    top right corner is best. The same slot as figC1_side."""
+    platforms = [p for p in st.PLATFORMS
+                 if any(db.has((ref, "hifiasm", p, depth, ph)) for ph in phasers_on(p))]
+    if not platforms:
+        raise NoData("no phaser runs on the hifiasm SNPs of %s at %dx on %s" % (sample, depth, ref))
+    w, h = st.PAPER_PANELS["asm_side"]
+    fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
+    grid = fig.add_gridspec(len(platforms) + 1, 1, height_ratios=[1] * len(platforms) + [0.3])
+    shown = []
+    for i, platform in enumerate(platforms):
+        ax = fig.add_subplot(grid[i, 0])
+        xs, ys = [], []
+        for ph in phasers_on(platform):
+            pts = []
+            for inp in ("truth", "hifiasm"):
+                k = (ref, inp, platform, depth, ph)
+                x, y = switch_pct(db, k), n50_mb(db, k)
+                pts.append((x, y) if finite(x) and finite(y) and x > 0 and y > 0 else None)
+            if not any(pts):
+                continue
+            c, m = st.PHASER_COLOR[ph], st.PHASER_MARKER[ph]
+            if ph not in shown:
+                shown.append(ph)
+            if all(pts):
+                ax.annotate("", xy=pts[1], xytext=pts[0],
+                            arrowprops=dict(arrowstyle="-|>", color=c, linewidth=0.7,
+                                            shrinkA=2.5, shrinkB=2.5, mutation_scale=5), zorder=3)
+            for pt, filled in zip(pts, (False, True)):
+                if not pt:
+                    continue
+                ax.plot(*pt, marker=m, markersize=3.6, linestyle="none", zorder=4 + filled,
+                        markerfacecolor=c if filled else "white", markeredgecolor="white" if filled else c,
+                        markeredgewidth=0.3 if filled else 0.9)
+                xs.append(pt[0])
+                ys.append(pt[1])
+        if not xs:
+            empty_panel(ax)
+            continue
+        ax.set_title(st.PLATFORM_LABEL[platform])
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        xlo, xhi, ylo, yhi = min(xs) / 1.5, max(xs) * 1.5, min(ys) / 1.2, max(ys) * 1.2
+        ax.set_xlim(xhi, xlo)          # reversed: fewer switches to the right, the top right corner is best
+        ax.set_ylim(ylo, yhi)
+        log_ticks_13(ax.xaxis, xlo, xhi)
+        log_ticks_13(ax.yaxis, ylo, yhi)
+        if len(ax.get_xticks()) < 2:
+            ax.xaxis.set_major_locator(FixedLocator([float("%.2g" % min(xs)), float("%.2g" % max(xs))]))
+        if len(ax.get_yticks()) < 2:
+            ax.yaxis.set_major_locator(FixedLocator([float("%.2g" % min(ys)), float("%.2g" % max(ys))]))
+        ax.grid(color=st.GRID, linewidth=0.5)
+        ax.set_axisbelow(True)
+        ax.set_ylabel("NG50 (Mb)")
+        if i == len(platforms) - 1:
+            ax.set_xlabel("Switch error rate (%)")
+    if not shown:
+        plt.close(fig)
+        raise NoData("no switch rates of the hifiasm SNP runs of %s on %s" % (sample, ref))
+    legend_ax = fig.add_subplot(grid[len(platforms), 0])
+    legend_ax.axis("off")
+    handles = [Line2D([], [], marker=st.PHASER_MARKER[ph], linestyle="none", markersize=3,
+                      color=st.PHASER_COLOR[ph], markeredgecolor="white", markeredgewidth=0.3,
+                      label=st.PHASER_LABEL[ph]) for ph in shown]
+    handles += [Line2D([], [], marker="o", linestyle="none", markersize=3, markerfacecolor="white",
+                       markeredgecolor=st.MUTED, label="Truth SNPs"),
+                Line2D([], [], marker="o", linestyle="none", markersize=3, color=st.MUTED, label="hifiasm SNPs")]
+    legend_ax.legend(handles=handles, loc="center", ncol=2, borderaxespad=0, columnspacing=0.8,
+                     handletextpad=0.2, handlelength=1.0, labelspacing=0.3, frameon=False)
+    paper_title(fig, "Phasers on the truth SNPs and on the hifiasm SNPs, %d×" % depth)
+    return save(fig, ctx, fig_name("figC6_switch_ng50_%dx" % depth, sample, ref))
+
+
 # --------------------------------------------------------------------- main
 
 def samples_of(ctx):
@@ -776,6 +857,8 @@ def main():
                     results.append(run("C %s %s %s" % (sample, ref, metric[0]), figC_metric, db, ctx,
                                        sample, ref, number, metric, ctx.asm_depth, with_hifiasm))
                 results.append(run("C %s %s switch beside the chromosomes" % (sample, ref), figC1_side, db, ctx,
+                                   sample, ref, ctx.asm_depth))
+                results.append(run("C %s %s switch vs NG50" % (sample, ref), figC6_scatter, db, ctx,
                                    sample, ref, ctx.asm_depth))
     print("%d written, %d skipped for lack of data, %d failed -> %s" % (
         results.count("ok"), results.count("skip"), results.count("failed"), ctx.out))
