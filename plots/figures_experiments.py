@@ -583,8 +583,11 @@ def side_bars(ctx, name, size, title, platforms, columns, legend=None, xmax=None
         raise NoData("no values for %s" % name)
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
     ratios = [len(rows[0][p]) for p in platforms]
+    # the legend in a row when each entry gets 22 mm, else one under the other
+    ncol = (len(legend) if w / len(legend) >= 22 else 1) if legend else 1
     grid = fig.add_gridspec(len(platforms) + bool(legend), len(columns),
-                            height_ratios=ratios + [0.07 * sum(ratios) * len(legend)] if legend else ratios)
+                            height_ratios=ratios + [0.07 * sum(ratios) * math.ceil(len(legend) / ncol)]
+                            if legend else ratios)
     # the value labels: 5 pt where a bar is 2.2 mm high or more and the column 20 mm wide, else 4 pt
     n_rows = sum(len(rows[0][p]) for p in platforms)
     n_bars = max(len(bars) for p in platforms for _, bars in rows[0][p])
@@ -639,7 +642,7 @@ def side_bars(ctx, name, size, title, platforms, columns, legend=None, xmax=None
     if legend:
         legend_ax = fig.add_subplot(grid[len(platforms), :])
         legend_ax.axis("off")
-        legend_ax.legend(handles=legend_patches(legend), loc="center", ncol=1, borderaxespad=0,
+        legend_ax.legend(handles=legend_patches(legend), loc="center", ncol=ncol, borderaxespad=0,
                          handlelength=1.2, handletextpad=0.4, labelspacing=0.3)
     paper_title(fig, title)
     return save(fig, ctx, name)
@@ -665,8 +668,8 @@ def figB3_side(db, ctx, sample, ref):
 def figC1_side(db, ctx, sample, ref, depth):
     """Switch error rate and phase-block NG50 side by side as horizontal bars:
     each read-based phaser on the truth SNPs (light) and on the SNPs of the
-    hifiasm assembly without parents (dark) - a narrow column beside the
-    chromosome figure of the switch errors."""
+    hifiasm assembly without parents (dark), told apart in the legend - a
+    narrow column beside the chromosome figure of the switch errors."""
     platforms = [p for p in st.PLATFORMS
                  if any(db.has((ref, "hifiasm", p, depth, ph)) for ph in phasers_on(p))]
 
@@ -678,9 +681,10 @@ def figC1_side(db, ctx, sample, ref, depth):
                     for ph in phasers_on(platform) if db.has((ref, "hifiasm", platform, depth, ph))]
         return rows_of
     return side_bars(ctx, fig_name("figC1_side_switch_ng50_%dx" % depth, sample, ref), "asm_side",
-                     "Phasers on the truth SNPs (light) and on the hifiasm SNPs (dark), %d×" % depth,
+                     "Phasers on the truth SNPs and on the hifiasm SNPs, %d×" % depth,
                      platforms, [("Switch error\nrate (%)", rows(switch_pct)),
-                                 ("Phase-block\nNG50 (Mb)", rows(n50_mb))])
+                                 ("Phase-block\nNG50 (Mb)", rows(n50_mb))],
+                     legend=[("Truth SNPs", PALE, None), ("hifiasm SNPs", 1.0, None)])
 
 
 # --------------------------------------------------------------------- main
