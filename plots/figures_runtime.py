@@ -130,8 +130,7 @@ def runtime_mirror(ctx, path, ref, chrom):
     from matplotlib.patches import Patch
     legend_ax.legend(handles=[Patch(color=st.PHASER_COLOR[ph], label=st.PHASER_LABEL[ph]) for ph in phasers],
                      loc="center", ncol=3, borderaxespad=0, frameon=False, columnspacing=1.0)
-    paper_title(fig, "Run time and peak memory, %s, 1 thread, %s"
-                % (chrom, st.REFERENCE_LABEL[ref]))
+    paper_title(fig, "Runtime and peak memory comparison among phasing methods")
     return save(fig, ctx, "figT3_runtime_memory_%s_%s" % (chrom, ref))
 
 

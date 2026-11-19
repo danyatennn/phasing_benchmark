@@ -43,7 +43,7 @@ from figures import NoData, panel_row, platform_handles, save, top_legend, y_gri
 # into 50+.
 GROUPS = [(1, 1, "1"), (2, 2, "2"), (3, 4, "3-4"), (5, 9, "5-9"), (10, 19, "10-19"),
           (20, 49, "20-49"), (50, 10 ** 9, "50+")]
-COUNT_LABEL = {"snps": "Het SNPs hit by the read", "votes": "Phased SNPs the read votes with"}
+COUNT_LABEL = {"snps": "HET SNPs per read", "votes": "Phased SNPs the read votes with"}
 
 
 def load(root, sample, ref, depth, caller, count):
@@ -196,7 +196,7 @@ def fig_distribution(ctx, ref):
     ax.set_ylim(0, ctx.ymax if ctx.ymax else 1.15 * top)
     ax.set_xlabel("Cumulative share of reads")
     ax.set_ylabel(COUNT_LABEL["snps"])
-    fig.suptitle("Het SNPs per read")
+    fig.suptitle("Distribution of heterozygous SNPs per read")
     ax.legend(loc="upper right", handlelength=1.2)
     y_grid(ax)
     return save(fig, ctx, "figR3c_snps_per_read_%s" % ref)

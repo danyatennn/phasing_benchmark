@@ -146,7 +146,7 @@ def fig_crossref(ctx):
         ax = draw_upset(fig, grid[0, i], grid[1, i], combos, values, ranges, colors, CROSS_SETS, CROSS_LABEL, CROSS_SET_COLOR,
                         groups, "Reads of the stratum (%)", show_sets=(i == 0), title=title, sharey=first_ax)
         first_ax = first_ax or ax
-    paper_title(fig, "Where the reads of %s land on the other reference, 30×"
+    paper_title(fig, "Cross-reference mapping of reads from %s"
                 % stratum_label(ctx.stratum).replace("\n", " ").lower())
     return save(fig, ctx, "figU1_crossref_%s_%s" % (ctx.stratum, ctx.reads))
 
@@ -205,7 +205,7 @@ def fig_labels(ctx):
     legend_ax.legend(handles=[Patch(facecolor="#9A9A9A", alpha=0.45, hatch="////", edgecolor="white",
                                     label="Labels disagree")],
                      loc="center", ncol=1, borderaxespad=0, frameon=False)
-    paper_title(fig, "Reads labelled by each parental method, T2T-CHM13, 30×")
+    paper_title(fig, "Reads labelled by each parental method")
     return save(fig, ctx, "figU2_read_labels")
 
 

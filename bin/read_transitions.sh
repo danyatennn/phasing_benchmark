@@ -4,12 +4,15 @@
 #
 #   metrics_reads/transitions/<platform>_<depth>x_<input>.tsv   phaser grch38 t2t region reads
 #
-# region: difficult or other, by the read's T2T-CHM13 alignment against all
-# difficult regions of T2T-CHM13 (bin/prepare_strata.sh).
+# region: both, t2t, grch38 or other - in all difficult regions of both
+# references, of T2T-CHM13 only, of GRCh38 only or of neither, each by the read's
+# alignment on that reference (bin/prepare_strata.sh). A table of the earlier
+# layout (difficult/other by T2T-CHM13 alone) is set aside as .t2t_regions and
+# made again.
 #
 # Needs, on both references: the read tables (bin/read_tables.sh), the truth
-# allele matrices (bin/allele_matrix.sh), the parental labels
-# (bin/matpat_truth.sh, either reference), the truth haplotag lists and the
+# allele matrices (bin/allele_matrix.sh), the consensus parental labels
+# (bin/consensus_truth.sh, either reference), the truth haplotag lists and the
 # haplotag lists and phased VCFs of the phasers (eval_run.sh). HG002 only (the
 # Q100 labels). Holds every read name of a cell in memory: run it on a host
 # with room.
@@ -42,7 +45,7 @@ for platform in "${PLATFORMS[@]}"; do
   for ref in GRCh38 T2T; do
     k="$(tr '[:upper:]' '[:lower:]' <<<"${ref}")"
     cell="$(bam_key "${platform}" "${ref}" "${TRANSITION_DEPTH}")"
-    labels="${READS_DIR}/${cell}.matpat.tsv.gz"
+    labels="${READS_DIR}/${cell}.consensus.tsv.gz"
     [[ -s "${labels}" ]] && args+=(--labels "${labels}")
     args+=(--reads-"${k}" "${READS_DIR}/${cell}.reads.tsv.gz"
            --alleles-"${k}" "${READS_DIR}/${cell}_truth.reads.tsv.gz"
@@ -62,16 +65,21 @@ for platform in "${PLATFORMS[@]}"; do
       newer_than "${out}" "${tags}" && newer_than "${out}" "${vcf}" || rm -f "${out}"
     done
   done
-  [[ " ${args[*]} " == *" --labels "* ]] || { warn "${platform}: no reads/<cell>.matpat.tsv.gz - run bin/matpat_truth.sh"; missing=1; }
+  [[ " ${args[*]} " == *" --labels "* ]] || { warn "${platform}: no reads/<cell>.consensus.tsv.gz - run bin/consensus_truth.sh"; missing=1; }
   difficult="$(REFERENCE_NAME=T2T stratum_bed alldifficultregions)"
+  difficult_grch38="$(REFERENCE_NAME=GRCh38 stratum_bed alldifficultregions)"
   [[ -s "${difficult}" ]] || { warn "${platform}: missing ${difficult}"; missing=1; }
+  [[ -s "${difficult_grch38}" ]] || { warn "${platform}: missing ${difficult_grch38}"; missing=1; }
   [[ "${missing}" == 0 ]] || { warn "skip ${platform}"; continue; }
   # a table of the earlier layout, without the region column, is made again
   [[ -s "${out}" ]] && ! head -1 "${out}" | grep -q region && rm -f "${out}"
+  if [[ -s "${out}" ]] && awk -F'\t' 'NR > 1 && $4 == "difficult" { f = 1; exit } END { exit !f }' "${out}"; then
+    mv -f "${out}" "${out}.t2t_regions"
+  fi
   [[ -s "${out}" ]] && { log "skip ${platform}: up to date"; continue; }
   log "${platform} ${TRANSITION_DEPTH}x: read states on GRCh38 and T2T-CHM13 (${TRANSITION_PHASERS[*]})"
   "${PLOTS_PYTHON}" "${PROJECT_ROOT}/plots/read_transitions.py" "${args[@]}" \
-      --difficult "${difficult}" --min-snps "${READACC_MIN_SNPS}" --out "${out}" \
+      --difficult "${difficult}" --difficult-grch38 "${difficult_grch38}" --min-snps "${READACC_MIN_SNPS}" --out "${out}" \
     2>>"${LOGS_DIR}/reads/transitions_${platform}_${TRANSITION_DEPTH}x.log" \
     || die "read transitions failed for ${platform}, see ${LOGS_DIR}/reads/transitions_${platform}_${TRANSITION_DEPTH}x.log"
   tail -n "$(( ${#TRANSITION_PHASERS[@]} + 2 ))" "${LOGS_DIR}/reads/transitions_${platform}_${TRANSITION_DEPTH}x.log" >&2

@@ -26,6 +26,7 @@ HG002 lives at the project root; any other sample under samples/<sample>/.
 
 import math
 import os
+import sys
 
 from style import applies as phaser_applies
 
@@ -37,9 +38,27 @@ NAN = float("nan")
 # consensus, two of those and the Q100 SNP alleles (bin/consensus_truth.sh).
 # READ_TRUTH=kmer python plots/make_plots.py --out <a folder of its own>: the
 # file names keep _matpat
-READ_TRUTH = os.environ.get("READ_TRUTH", "matpat")
+READ_TRUTH = os.environ.get("READ_TRUTH", "consensus")
 # the part of a file name that says which labels the read figures use
 TRUTH_SFX = "_" + READ_TRUTH
+# the read classes (bin/read_classes.sh) scored against READ_TRUTH:
+# <x>.classes_<truth>.tsv; <x>.classes.tsv is scored against the truth haplotags
+CLASSES_SFX = "" if READ_TRUTH == "truthtags" else TRUTH_SFX
+_noted = set()
+
+
+def classes_table(path):
+    """the READ_TRUTH version of a read-classes table (.../<x>classes.tsv ->
+    <x>classes_<truth>.tsv) when there is one; else the table itself, scored
+    against the truth haplotags, said once on stderr"""
+    alt = path[:-len(".tsv")] + CLASSES_SFX + ".tsv"
+    if not CLASSES_SFX or os.path.exists(alt):
+        return alt
+    if os.path.exists(path) and path not in _noted:
+        _noted.add(path)
+        print("note: no %s, the read classes of %s are scored against the truth haplotags"
+              % (os.path.basename(alt), os.path.basename(path)), file=sys.stderr)
+    return path
 
 # a gene set beside the GIAB strata, HG002 only (bin/genes_run.sh): its rows are
 # written as the strata's are, under metrics_genes/<set>/conf (genes cut to the
@@ -394,7 +413,7 @@ class Metrics:
     # bin/read_classes.sh: (stratum, group_type, group) -> numbers, per run
     def classes(self, key):
         if key not in self._classes:
-            path = os.path.join(self.reads_dir, self.name(*key) + ".classes.tsv")
+            path = classes_table(os.path.join(self.reads_dir, self.name(*key) + ".classes.tsv"))
             table = {}
             for line in _read_table(path):
                 k = (line.get("stratum"), line.get("group_type"), line.get("group"))

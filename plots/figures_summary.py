@@ -48,7 +48,7 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as matplotlib_colors
 
 import style as st
-from data import GENE_SET, GENE_SET_DIR, sample_root
+from data import GENE_SET, GENE_SET_DIR, classes_table, sample_root
 from figures import (NoData, pin_axes, SameDecimals, colorbar, heatmap, log_ticks, paper_title, same_decimals, save, series_handle,
                      sig_number, stratum_label, top_legend, y_grid)
 
@@ -146,10 +146,10 @@ def parental_rows(ctx):
 CLASSES = [
     ("lowmapq_paralog", "Low MAPQ, paralogous", "#9C3D2E", None),
     ("lowmapq_other", "Low MAPQ, elsewhere", "#DA9A82", None),
-    ("snps_unphased", "Het SNPs, not phased", "#4F6D80", None),
+    ("snps_unphased", "HET SNPs, not phased", "#4F6D80", None),
     ("phased_unassigned", "Phased, no haplotype", "#B5C4CF", None),
-    ("no_snp_outside_bed", "No het SNP, outside benchmark", "#EADCA6", "////"),
-    ("no_snp", "No het SNP", "#C7A23F", None),
+    ("no_snp_outside_bed", "No HET SNP, outside benchmark", "#EADCA6", "////"),
+    ("no_snp", "No HET SNP", "#C7A23F", None),
 ]
 
 
@@ -209,7 +209,7 @@ def donut_figure(ctx, group_type, classes, center_word, title, name, share=True)
     """Donuts of the reads of genome-wide read classes (bin/read_classes.sh),
     a row per platform, the references side by side. group_type: class (why
     untagged) or confidence (the SNP votes behind the read's haplotype)."""
-    rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+    rows = [r for r in table(classes_table(path_of(ctx, "metrics_reads", "summary_classes.tsv")))
             if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
             and r.get("phaser") == ctx.phaser and r.get("stratum") == "genome"]
     if not rows:
@@ -259,7 +259,7 @@ def donut_figure(ctx, group_type, classes, center_word, title, name, share=True)
 def fig_r5(ctx):
     """A figure per platform: the untagged reads by reason, GRCh38 left,
     T2T-CHM13 right, the legend under them; figR20 goes beside it."""
-    rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+    rows = [r for r in table(classes_table(path_of(ctx, "metrics_reads", "summary_classes.tsv")))
             if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
             and r.get("phaser") == ctx.phaser and r.get("stratum") == "genome"
             and r.get("group_type") in ("class", "all")]
@@ -288,7 +288,7 @@ def fig_r5(ctx):
         handles = [Patch(facecolor=c, hatch=hh, edgecolor="white", label=l) for _, l, c, hh in CLASSES]
         fig.legend(handles=handles, loc="outside lower center", ncol=2, handlelength=1.0,
                    handletextpad=0.4, columnspacing=1.2)
-        fig.suptitle("Why %s reads are not haplotagged" % st.PLATFORM_LABEL[platform])
+        fig.suptitle("Statistics of unhaplotagged reads")
         made.append(save(fig, ctx, "figR5_untagged_reasons_%s_%s" % (ctx.phaser, platform)))
     if not made:
         raise NoData("no read classes for %s %s %dx" % (ctx.caller, ctx.phaser, ctx.depth))
@@ -335,7 +335,7 @@ def rate_values(ctx):
     return out
 
 
-RATE_LABEL = {"phased": "Truth het SNPs phased (%)", "tagged": "Reads tagged (%)"}
+RATE_LABEL = {"phased": "Truth HET SNPs phased (%)", "tagged": "Reads tagged (%)"}
 
 
 def fig_r6(ctx):
@@ -454,7 +454,7 @@ def fig_r7(ctx):
         ylo, yhi = min(ys), max(ys)
         pad = 0.08 * (yhi - ylo or 1)
         axes[0][0].set_ylim(ylo - pad, min(100.5, yhi + pad))
-        axes[0][0].set_ylabel("Truth het SNPs phased (%)")
+        axes[0][0].set_ylabel("Truth HET SNPs phased (%)")
         handles = [series_handle(st.PLATFORM_COLOR[p], st.PLATFORM_MARKER[p], st.PLATFORM_LABEL[p], line=False)
                    for p in st.PLATFORMS if any(k[2] == p for k in keys)]
         handles += [Line2D([], [], marker="o", linestyle="none", markerfacecolor="white",
@@ -511,7 +511,7 @@ def r7_small(ctx, phaser, ref, start, end):
     pad = 0.08 * (yhi - ylo or 1)
     ax.set_ylim(ylo - pad, min(100.5, yhi + pad))
     ax.set_xlabel("Switch error rate (%)")
-    ax.set_ylabel("Truth het SNPs phased (%)")
+    ax.set_ylabel("Truth HET SNPs phased (%)")
     ax.grid(color=st.GRID, linewidth=0.5)
     ax.set_axisbelow(True)
     # two rows, filled column by column: ONT, PacBio (short names, the panel
@@ -585,7 +585,7 @@ def fig_r8(ctx):
     axes[-1, 0].set_xticklabels([l for _, l in strata], rotation=40, ha="right", rotation_mode="anchor")
     axes[0, 0].legend(handles=[Patch(color=st.CALLER_COLOR[c], label=st.CALLER_LABEL[c]) for c in callers],
                       loc="lower center", bbox_to_anchor=(0.5, 1.15), ncol=len(callers))
-    fig.suptitle("Het SNP calling across genomic regions, %s, %dx" % (st.REFERENCE_LABEL[ctx.ref], ctx.depth))
+    fig.suptitle("HET SNP calling across genomic regions, %s, %dx" % (st.REFERENCE_LABEL[ctx.ref], ctx.depth))
     return save(fig, ctx, "figR8_callers_strata_%s_%s" % (ctx.metric, ctx.ref))
 
 
@@ -769,7 +769,7 @@ def fig_r10(ctx):
     strata_rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv"))
                    if r.get("caller") == ctx.caller and int(float(r.get("depth", 0))) == ctx.depth
                    and r.get("phaser") == ctx.phaser]
-    class_rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+    class_rows = [r for r in table(classes_table(path_of(ctx, "metrics_reads", "summary_classes.tsv")))
                   if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
                   and r.get("phaser") == ctx.phaser and r.get("group_type") == "all"]
     if not strata_rows:
@@ -849,7 +849,7 @@ def fig_r12(ctx):
     strata_rows = [r for r in table(path_of(ctx, "metrics_strata_auto", "summary_phase_strata.tsv"))
                    if r.get("caller") == ctx.caller and int(float(r.get("depth", 0))) == ctx.depth
                    and r.get("phaser") == ctx.phaser]
-    class_rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+    class_rows = [r for r in table(classes_table(path_of(ctx, "metrics_reads", "summary_classes.tsv")))
                   if r.get("caller") == ctx.caller and r.get("depth") == str(ctx.depth)
                   and r.get("phaser") == ctx.phaser and r.get("group_type") == "all"]
     if not strata_rows:
@@ -1059,7 +1059,7 @@ def fig_r14(ctx):
         # darker = more: more phased correctly / more lost to the caller
         for tag, row_inputs, value, bar_label in (
                 ("phased", inputs, lambda p, c, s_: val.get((ref, c, p, s_), math.nan),
-                 "Truth het SNPs phased correctly (%)"),
+                 "Truth HET SNPs phased correctly (%)"),
                 ("loss", callers, lambda p, c, s_: val.get((ref, "truth", p, s_), math.nan)
                  - val.get((ref, c, p, s_), math.nan),
                  "Points lost against the truth input")):
@@ -1076,7 +1076,7 @@ def fig_r14(ctx):
                          vmin=min(shown), vmax=max(shown))
             plt.setp(ax.get_xticklabels(), rotation=40, ha="right", rotation_mode="anchor")
             colorbar(fig, im, ax, bar_label)
-            fig.suptitle("%s: %s, %s, %dx, on each input's het SNPs" % (
+            fig.suptitle("%s: %s, %s, %dx, on each input's HET SNPs" % (
                 bar_label, st.REFERENCE_LABEL[ref], st.PHASER_LABEL[ctx.phaser], ctx.depth))
             made.append(save(fig, ctx, "figR14_callers_%s_%s_%s" % (tag, ctx.phaser, ref)))
     if not made:
@@ -1166,7 +1166,7 @@ def fig_r16(ctx):
         sfx = "_" + ctx.read_truth
         how = ", %s, T2T-CHM13 regions" % READ_TRUTH_LABEL[ctx.read_truth]
     else:
-        rows = [r for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))
+        rows = [r for r in table(classes_table(path_of(ctx, "metrics_reads", "summary_classes.tsv")))
                 if r.get("depth") == str(ctx.depth) and r.get("group_type") == "class"
                 and r.get("group") == "tagged"]
         sfx = how = ""
@@ -1359,7 +1359,7 @@ def fig_r17(ctx):
             fig.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False)
             title = st.REFERENCE_LABEL[ref] if not other else "%s against %s" % (
                 st.REFERENCE_LABEL[ref], st.REFERENCE_LABEL[other])
-            fig.suptitle("Het SNP calls across genomic regions: %s, %s, %dx" % (
+            fig.suptitle("HET SNP calls across genomic regions: %s, %s, %dx" % (
                 st.PLATFORM_LABEL[platform], title, ctx.depth))
             tag = ref if not other else "%s_vs_%s" % (ref, other)
             made.append(save(fig, ctx, "figR17_callers_prf_%s_%dx_%s" % (platform, ctx.depth, tag)))
@@ -1425,7 +1425,7 @@ def r18_draw(ctx, by):
         x = series(r)
         if x and int(float(r.get("depth", 0))) == ctx.depth:
             val[("n50", r["reference"], r["platform"], x, r["stratum"])] = num(r["block_n50"]) / 1e6
-    for r in table(path_of(ctx, "metrics_reads", "summary_classes.tsv")):
+    for r in table(classes_table(path_of(ctx, "metrics_reads", "summary_classes.tsv"))):
         x = series(r)
         if (x and r.get("depth") == str(ctx.depth)
                 and r.get("group_type") == "class" and r.get("group") == "tagged"):
@@ -1567,7 +1567,7 @@ def bubble_figure(values, strata, ylabel, title, hline=None, from_zero=False):
                              borderaxespad=0)
     legend_ax.add_artist(first)
     # the sizes after a "Het SNPs" with no marker, on one line
-    sizes = [Line2D([], [], linestyle="", label="Het SNPs:")]
+    sizes = [Line2D([], [], linestyle="", label="HET SNPs:")]
     sizes += [dot(bubble_size(n), st.MUTED, text) for n, text in BUBBLE_SIZES]
     legend_ax.legend(handles=sizes, loc="lower center", ncol=len(sizes), handlelength=2.0, handletextpad=0.1,
                      columnspacing=0.6, borderaxespad=0)
@@ -1609,7 +1609,7 @@ def fig_r19(ctx):
         vaf = {k: (a / n, n) for k, (a, n) in sums.items() if n > 0}
         strata = [(s_, l) for s_, l in BUBBLE_STRATA if any(k[1] == s_ for k in vaf)]
         if strata:
-            fig = bubble_figure(vaf, strata, "Mean VAF of het SNPs", "Mean VAF of het SNPs by region", hline=0.5)
+            fig = bubble_figure(vaf, strata, "Mean VAF of HET SNPs", "Mean VAF of HET SNPs by region", hline=0.5)
             made.append(save(fig, ctx, "figR19b_vaf_bubbles_%s" % ref))
     if not made:
         raise NoData("no summary_phase_strata.tsv rows for %s %s %dx and no vaf_<ref>.tsv"
@@ -1624,7 +1624,7 @@ def fig_r19(ctx):
 # (state, row label, column label)
 TRANSITION_STATES = [
     ("other", "Not haplotagged:\nother", "Other"),
-    ("no_snp", "Not haplotagged:\nno het SNP", "No het SNP"),
+    ("no_snp", "Not haplotagged:\nno HET SNP", "No HET SNP"),
     ("outside", "Not haplotagged:\noutside benchmark", "Outside benchmark"),
     ("lowmapq", "Not haplotagged:\nMAPQ < 20", "MAPQ < 20"),
     ("wrong", "Haplotagged,\nwrong haplotype", "Wrong haplotype"),
@@ -1632,12 +1632,17 @@ TRANSITION_STATES = [
 ]
 
 
-def transition_counts(path, phaser):
+# the reads of the union of the difficult regions of the two references
+# (plots/read_transitions.py: in those of both, of T2T-CHM13 only, of GRCh38 only)
+DIFFICULT_UNION = ("both", "t2t", "grch38")
+
+
+def transition_counts(path, phaser, regions=None):
     """(GRCh38 state, T2T state) -> reads of a bin/read_transitions.sh table,
-    summed over the regions"""
+    summed over the regions given (default all)"""
     counts = {}
     for r in table(path):
-        if r.get("phaser") == phaser:
+        if r.get("phaser") == phaser and (regions is None or r.get("region") in regions):
             k = (r["grch38"], r["t2t"])
             counts[k] = counts.get(k, 0) + num(r["reads"])
     return counts
@@ -1645,13 +1650,14 @@ def transition_counts(path, phaser):
 
 def fig_r20(ctx):
     """A matrix per platform: rows the read's state on GRCh38, columns on
-    T2T-CHM13, the same reads; colour the number of reads (log), the text its
+    T2T-CHM13, the same reads - those in the difficult regions of either
+    reference (the union); colour the number of reads (log), the text its
     share of all of them. metrics_reads/transitions/ of bin/read_transitions.sh."""
     keys = [k for k, _, _ in TRANSITION_STATES]
     made = []
     for platform in st.PLATFORMS:
         path = path_of(ctx, "metrics_reads", "transitions", "%s_%dx_%s.tsv" % (platform, ctx.depth, ctx.caller))
-        counts = transition_counts(path, ctx.phaser)
+        counts = transition_counts(path, ctx.phaser, DIFFICULT_UNION)
         m = np.array([[counts.get((a, b), 0) for b in keys] for a in keys], dtype=float)
         total = m.sum()
         if not total:
@@ -1690,10 +1696,11 @@ def fig_r20(ctx):
         bar.set_label("Reads")
         bar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: short(v)))
         bar.outline.set_linewidth(0.4)
-        fig.suptitle("Read states from GRCh38 to T2T-CHM13, %s" % st.PLATFORM_LABEL[platform])
+        fig.suptitle("Read states from GRCh38 to T2T-CHM13 in difficult regions, %s" % st.PLATFORM_LABEL[platform])
         made.append(save(fig, ctx, "figR20_read_transitions_%s_%s_%dx" % (ctx.phaser, platform, ctx.depth)))
     if not made:
-        raise NoData("no metrics_reads/transitions/<platform>_%dx_%s.tsv - run bin/read_transitions.sh"
+        raise NoData("no metrics_reads/transitions/<platform>_%dx_%s.tsv with both, t2t and grch38 regions"
+                     " - run bin/read_transitions.sh"
                      % (ctx.depth, ctx.caller))
     return ", ".join(made)
 
@@ -1714,7 +1721,7 @@ def fig_r21(ctx):
         for r in table(path):
             if r.get("phaser") == ctx.phaser and r["t2t"] == "correct" and r["grch38"] != "correct":
                 rescued += num(r["reads"])
-                hard += num(r["reads"]) if r.get("region") == "difficult" else 0
+                hard += num(r["reads"]) if r.get("region") in ("difficult", "both", "t2t") else 0
         if rescued:
             data[platform] = (rescued, hard)
     if not data:
@@ -1768,8 +1775,8 @@ def main():
     ap.add_argument("--min-slice", type=float, default=0.025,
                     help="R5: smallest drawn slice, as a fraction of the ring (0: true sizes)")
     ap.add_argument("--top", type=int, default=7, help="R9: columns per group")
-    ap.add_argument("--read-truth", choices=["truthtags", "matpat", "yak", "kmer", "consensus"], default="truthtags",
-                    help="R15, R16, R18: read labels (matpat, yak: no reference, T2T regions)")
+    ap.add_argument("--read-truth", choices=["truthtags", "matpat", "yak", "kmer", "consensus"], default="consensus",
+                    help="R15, R16, R18: read labels (matpat, yak, kmer, consensus: no reference, T2T regions)")
     ap.add_argument("--png", action="store_true")
     ctx = ap.parse_args()
     ctx.out = ctx.out or os.path.join(ctx.root, "plots", "pdf")

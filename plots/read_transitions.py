@@ -4,9 +4,9 @@ platform and coverage: how many reads go from each state on GRCh38 to each
 state on T2T-CHM13, per phaser, split by where the read lies. The numbers
 behind figR20 and figR21 of plots/figures_summary.py.
 
-Reads: those with a parental label (bin/matpat_truth.sh, PAT or MAT; the label
-does not depend on the reference) with a primary alignment in the read tables
-of both cells, on chr1-22 on at least one reference.
+Reads: those with a parental label (bin/consensus_truth.sh, PAT or MAT; the
+label does not depend on the reference) with a primary alignment in the read
+tables of both cells, on chr1-22 on at least one reference.
 
 State on a reference, the first rule that fits (as plots/read_classes.py):
   correct    tagged H1/H2 in a block of --min-snps phased het SNPs or more,
@@ -21,9 +21,12 @@ State on a reference, the first rule that fits (as plots/read_classes.py):
              primary alignment off chr1-22
 A tagged read in a block the truth cannot orient is left out (counted on stderr).
 
-Region: "difficult" if half the read's T2T-CHM13 alignment or more lies in
---difficult (all difficult regions of T2T-CHM13, the regions of the read
-recall), else "other" - one region for both references, as the read recall.
+Region: where the read lies by its alignment on each reference, half of the
+alignment or more in all difficult regions of that reference (--difficult for
+T2T-CHM13, the regions of the read recall; --difficult-grch38 for GRCh38):
+"both", "t2t" (T2T-CHM13 only), "grch38" (GRCh38 only) or "other". The union
+of the difficult regions of the two references is both + t2t + grch38. Without
+--difficult-grch38 a read is "t2t" or "other".
 
 Output, --out <file>: phaser grch38 t2t region reads
 
@@ -31,7 +34,8 @@ Output, --out <file>: phaser grch38 t2t region reads
       --run T2T whatshap ... --labels reads/<cell>.matpat.tsv.gz \\
       --reads-grch38 ... --alleles-grch38 ... --truth-vcf-grch38 ... \\
       --truth-tags-grch38 ... --bench-grch38 ... (and the same for t2t) \\
-      --difficult prepared_auto/T2T_alldifficultregions.bed --out out.tsv
+      --difficult prepared_auto/T2T_alldifficultregions.bed \\
+      --difficult-grch38 prepared_auto/GRCh38_alldifficultregions.bed --out out.tsv
 """
 
 import argparse
@@ -41,16 +45,17 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from benchio import IntervalSet, haplotag_list, is_autosome, open_text, phased_het, vcf_records
-from read_classes import blocks_and_orientation
+from read_classes import blocks_and_orientation, parent_swap
 
 MIN_MAPQ = 20
 STRATUM_FRACTION = 0.5
 REFS = ("GRCh38", "T2T")
 STATES = ["other", "no_snp", "outside", "lowmapq", "wrong", "correct"]
+REGIONS = ("both", "t2t", "grch38", "other")
 
 
 def parental_labels(paths):
-    """read -> 0 (PAT) or 1 (MAT), from every matpat table given"""
+    """read -> 0 (PAT) or 1 (MAT), from every label table given"""
     labels = {}
     for path in paths:
         with open_text(path) as fh:
@@ -87,21 +92,11 @@ def snps_per_read(path, wanted):
     return out
 
 
-def parent_swap(truth_tags, labels):
-    """chrom -> True if PAT is the truth's H2 there, as most reads labelled by both say"""
-    both = {}
-    for r, (hap, _, c) in haplotag_list(truth_tags, autosomes_only=True).items():
-        if hap in ("H1", "H2") and r in labels:
-            n = both.setdefault(c, [0, 0])
-            n[0 if (0 if hap == "H1" else 1) == labels[r] else 1] += 1
-    return {c: opp > same for c, (same, opp) in both.items()}
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--run", nargs=4, action="append", required=True,
                     metavar=("REF", "PHASER", "TAGS", "VCF"), help="GRCh38 or T2T, phaser, haplotag list, phased VCF")
-    ap.add_argument("--labels", action="append", required=True, help="reads/<cell>.matpat.tsv.gz, repeatable")
+    ap.add_argument("--labels", action="append", required=True, help="reads/<cell>.consensus.tsv.gz, repeatable")
     for ref in REFS:
         k = ref.lower()
         ap.add_argument("--reads-%s" % k, required=True, help="read table of the %s cell" % ref)
@@ -110,6 +105,7 @@ def main():
         ap.add_argument("--truth-tags-%s" % k, required=True, help="<cell>_truthtags.tsv on %s" % ref)
         ap.add_argument("--bench-%s" % k, required=True, help="benchmark BED of %s" % ref)
     ap.add_argument("--difficult", required=True, help="BED of all difficult regions of T2T-CHM13")
+    ap.add_argument("--difficult-grch38", help="BED of all difficult regions of GRCh38")
     ap.add_argument("--min-snps", type=int, default=2)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -135,13 +131,19 @@ def main():
     labels = {r: labels[r] for r in reads}
     snps = {ref: snps_per_read(opt("alleles", ref), wanted) for ref in REFS}
 
-    hard = IntervalSet.from_bed(args.difficult, autosomes_only=True)
-    region = {}
-    for r in reads:
-        c, start, end, _ = pos["T2T"][r]
-        inside = is_autosome(c) and hard.overlap(c, start, end) >= STRATUM_FRACTION * max(1, end - start)
-        region[r] = "difficult" if inside else "other"
-    del hard
+    def in_difficult(bed, ref):
+        """read -> half of its alignment on ref or more in the BED"""
+        hard = IntervalSet.from_bed(bed, autosomes_only=True)
+        out = {}
+        for r in reads:
+            c, start, end, _ = pos[ref][r]
+            out[r] = is_autosome(c) and hard.overlap(c, start, end) >= STRATUM_FRACTION * max(1, end - start)
+        return out
+
+    on_t2t = in_difficult(args.difficult, "T2T")
+    on_grch38 = in_difficult(args.difficult_grch38, "GRCh38") if args.difficult_grch38 else {}
+    region = {r: ("both" if on_grch38.get(r) else "t2t") if on_t2t[r]
+              else ("grch38" if on_grch38.get(r) else "other") for r in reads}
 
     # what a read is on a reference, whatever the phaser: None when it can be tagged
     base = {}
@@ -201,7 +203,7 @@ def main():
             counts[k] = counts.get(k, 0) + 1
         for a in STATES:
             for b in STATES:
-                for reg in ("difficult", "other"):
+                for reg in REGIONS:
                     lines.append("%s\t%s\t%s\t%s\t%d\n" % (p, a, b, reg, counts.get((a, b, reg), 0)))
         n = sum(counts.values())
         same = sum(v for (a, b, _), v in counts.items() if a == b)

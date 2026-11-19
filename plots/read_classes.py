@@ -29,7 +29,11 @@ most votes.
   none    no vote
 
 Accuracy: a tagged read with a truth label is compared after its block is
-oriented by its SNPs against the truth (as readacc_run.sh does).
+oriented by its SNPs against the truth (as readacc_run.sh does). The label is
+the parental one of --labels (bin/consensus_truth.sh, PAT/MAT), put on the
+truth's haplotypes per chromosome by the reads labelled by both it and the
+truth haplotag list (as read_recall_strata.py); without --labels, the truth
+haplotag list itself.
 
 Features, per group: reads, bases, mean length and MAPQ, soft-clipped share of
 the bases, edit distance (NM), mismatches and indels per aligned base, mean
@@ -40,6 +44,7 @@ A read belongs to a stratum if half its alignment or more lies in it.
 
   python plots/read_classes.py --reads-table <cell>.reads.tsv.gz \\
       --alleles reads/<cell>_<caller> --truth-tags <cell>_truthtags.tsv \\
+      --labels reads/<cell>.consensus.tsv.gz \\
       --truth-vcf truth.phased.vcf.gz --confident-bed bed \\
       --stratum segdups=prepared/GRCh38_segdups.bed ... \\
       --paralog segdups --paralog lowmappabilityall \\
@@ -241,11 +246,22 @@ def rows(labels, acc, strata_order):
     return out
 
 
+def parent_swap(truth_tags, labels):
+    """chrom -> True if PAT is the truth's H2 there, as most reads labelled by both say"""
+    both = {}
+    for r, (hap, _, c) in haplotag_list(truth_tags, autosomes_only=True).items():
+        if hap in ("H1", "H2") and r in labels:
+            n = both.setdefault(c, [0, 0])
+            n[0 if (0 if hap == "H1" else 1) == labels[r] else 1] += 1
+    return {c: opp > same for c, (same, opp) in both.items()}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--reads-table", required=True)
     parser.add_argument("--alleles", required=True, help="allele matrix prefix reads/<cell>_<caller>")
     parser.add_argument("--truth-tags", required=True)
+    parser.add_argument("--labels", help="parental labels (reads/<cell>.consensus.tsv.gz); default: the truth haplotag list")
     parser.add_argument("--truth-vcf", required=True)
     parser.add_argument("--confident-bed", required=True)
     parser.add_argument("--stratum", action="append", default=[], help="name=bed, repeatable")
@@ -285,7 +301,15 @@ def main():
         if bed.overlap(chrom, start, end) > 0:
             in_bed.add(r)
 
-    truth = truth_labels(args.truth_tags, "truthtags", autosomes_only=True)
+    if args.labels:
+        parental = truth_labels(args.labels, "parental", autosomes_only=True,
+                                read_chrom={r: info[0] for r, info in reads.items()})
+        swap = parent_swap(args.truth_tags, parental)
+        truth = {r: lab ^ swap[reads[r][0]] for r, lab in parental.items() if reads[r][0] in swap}
+        print("%s: %d reads with a parental label, %d on a chromosome the truth haplotags place"
+              % (args.labels, len(parental), len(truth)), file=sys.stderr)
+    else:
+        truth = truth_labels(args.truth_tags, "truthtags", autosomes_only=True)
     truth_gt = {(c, p, ref, alt): gt for c, p, ref, alt, gt, ps in
                 vcf_records(args.truth_vcf, autosomes_only=True) if phased_het(gt) is not None}
     alle = allele_reads(args.alleles)

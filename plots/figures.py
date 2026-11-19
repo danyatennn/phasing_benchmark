@@ -356,7 +356,7 @@ def fig1b(db, ctx, ref):
 
 def fig1c(db, ctx, ref):
     return coverage_lines(db, ctx, "fig1c_truth_phased_by_platform_" + ref, ref,
-                          truth_phased_pct, "Truth het SNPs phased (%)", "platform")
+                          truth_phased_pct, "Truth HET SNPs phased (%)", "platform")
 
 
 def fig2a(db, ctx, ref):
@@ -562,7 +562,7 @@ def fig4(db, ctx, ref, caller="truth"):
     axes[0].set_xlim(left=0)
     # a narrow axis: four ticks at most, so the labels do not touch
     axes[0].xaxis.set_major_locator(MaxNLocator(4))
-    axes[-1].set_xlabel("Switch errors per 100 pairs\nof het SNPs, %d×" % depth)
+    axes[-1].set_xlabel("Switch errors per 100 pairs\nof HET SNPs, %d×" % depth)
     paper_title(fig, "Switch errors across phasing methods")
     return save(fig, ctx, "fig4_switch_errors_%dx_%s" % (depth, ref))
 
@@ -732,12 +732,12 @@ def grid_cells(ref):
 
 def fig5a(db, ctx, ref):
     return coverage_lines(db, ctx, "fig5a_caller_fnr_" + ref, ref, fnr_pct,
-                          "Truth het SNPs missed (FNR, %)", "caller", log=True, caller="called")
+                          "Truth HET SNPs missed (FNR, %)", "caller", log=True, caller="called")
 
 
 def fig5b(db, ctx, ref):
     return coverage_lines(db, ctx, "fig5b_caller_fdr_" + ref, ref, fdr_pct,
-                          "Called het SNPs not in truth\n(FDR, %)", "caller", log=True, caller="called")
+                          "Called HET SNPs not in truth\n(FDR, %)", "caller", log=True, caller="called")
 
 
 def short_number(v):
@@ -787,12 +787,12 @@ def reads_lost_pct(db, key):
 
 def fig5c(db, ctx, ref):
     return grid_heatmap(db, ctx, ref, "fig5c_truth_lost_all_callers", truth_lost_pct,
-                        "Truth het SNPs not called or phased wrongly (%)")
+                        "Truth HET SNPs not called or phased wrongly (%)")
 
 
 def figS2a(db, ctx, ref):
     return grid_heatmap(db, ctx, ref, "figS2a_phasing_lost_all_callers", phasing_lost_pct,
-                        "Called truth het SNPs left unphased\nor phased wrongly (% of truth)")
+                        "Called truth HET SNPs left unphased\nor phased wrongly (% of truth)")
 
 
 def figS2b(db, ctx, ref):
@@ -1029,7 +1029,7 @@ def figS3b(db, ctx, ref):
     names, stats = strata_rows(db, ref)
     out = strata_bars(ctx, ref, "figS3b_strata_het_snp_density", names,
                       [stats[s]["het_snps_per_mb"] for s in names],
-                      "Truth het SNPs per Mb", lambda i, v: thousands(v))
+                      "Truth HET SNPs per Mb", lambda i, v: thousands(v))
     if out is None:
         raise NoData("no het SNP density for %s" % ref)
     return out
@@ -1051,7 +1051,7 @@ def figS3g(db, ctx, ref):
         return thousands(v) + share
 
     out = strata_bars(ctx, ref, "figS3g_strata_het_snp_count", names, count,
-                      "Truth het SNPs", text, log=True)
+                      "Truth HET SNPs", text, log=True)
     if out is None:
         raise NoData("no het SNP counts for %s" % ref)
     return out
@@ -1059,8 +1059,8 @@ def figS3g(db, ctx, ref):
 
 # the scored part dark, the rest in hues of their own so neighbours never blur
 COMPOSITION = [
-    ("Het SNP, benchmarked", "#2C3A4B"),
-    ("Het indel or multiallelic", "#C8775A"),
+    ("HET SNP, benchmarked", "#2C3A4B"),
+    ("HET indel or multiallelic", "#C8775A"),
     ("Hom alt", "#9DB7CC"),
     ("Hemizygous", "#E3CF9A"),
     ("Other", "#E6E6E6"),
@@ -1107,7 +1107,7 @@ def figS3d(db, ctx, ref):
     names, stats = strata_rows(db, ref)
     out = strata_bars(ctx, ref, "figS3d_strata_snp_spacing", names,
                       [positive(stats[s]["median_inter_snp_dist"]) for s in names],
-                      "Median distance to the next\ntruth het SNP (bp)",
+                      "Median distance to the next\ntruth HET SNP (bp)",
                       lambda i, v: thousands(v), log=True)
     if out is None:
         raise NoData("no SNP spacing for %s" % ref)
@@ -1119,7 +1119,7 @@ def figS3e(db, ctx, ref):
     names, stats = strata_rows(db, ref)
     out = strata_bars(ctx, ref, "figS3e_strata_close_snps", names,
                       [100 * stats[s]["frac_snp_within_50bp"] for s in names],
-                      "Truth het SNPs less than 50 bp\nfrom the next one (%)",
+                      "Truth HET SNPs less than 50 bp\nfrom the next one (%)",
                       lambda i, v: short_number(v) + "%")
     if out is None:
         raise NoData("no close SNPs for %s" % ref)
@@ -1176,7 +1176,7 @@ def fig5d(db, ctx, ref):
             ax.plot(correct, y, marker="o", markerfacecolor=color, markeredgecolor="white", zorder=4)
             here += 1
         ax.set_title(st.PLATFORM_LABEL[platform])
-        ax.set_xlabel("Truth het SNPs (%)")
+        ax.set_xlabel("Truth HET SNPs (%)")
         ax.grid(axis="x", color=st.GRID, linewidth=0.5, zorder=0)
         ax.set_axisbelow(True)
         ax.tick_params(axis="y", length=0)
@@ -1194,7 +1194,7 @@ def fig5d(db, ctx, ref):
     group_labels_left(first, [(st.CALLER_LABEL[c], len(st.PHASERS)) for c in st.CALLERS], ypos)
     top_legend(legend_ax, [
         Line2D([], [], color="none", marker="o", markerfacecolor="white",
-               markeredgecolor=st.MUTED, markeredgewidth=0.9, label="Called as het SNP"),
+               markeredgecolor=st.MUTED, markeredgewidth=0.9, label="Called as HET SNP"),
         Line2D([], [], color="none", marker="o", markerfacecolor=st.MUTED,
                markeredgecolor="white", label="Called and phased correctly, %d×" % depth),
     ])
@@ -1226,7 +1226,7 @@ def fig5e(db, ctx, ref):
                 ys_all.append(y)
                 here += 1
         ax.set_title(st.PLATFORM_LABEL[platform])
-        ax.set_xlabel("Truth het SNPs phased (%)")
+        ax.set_xlabel("Truth HET SNPs phased (%)")
         ax.grid(color=st.GRID, linewidth=0.5, zorder=0)
         ax.set_axisbelow(True)
         if not here:
@@ -1615,7 +1615,7 @@ def fig6b(db, ctx):
 
 def fig6c(db, ctx):
     return reference_scatter(db, ctx, "fig6c_reference_recall_phased",
-                             recall_pct, "Correctly phased truth het SNPs (%)", log=False)
+                             recall_pct, "Correctly phased truth HET SNPs (%)", log=False)
 
 
 def matpat_recall(db, sfx="_" + READ_TRUTH):

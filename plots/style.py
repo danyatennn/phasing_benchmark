@@ -51,7 +51,7 @@ CALLER_LABEL = {
     "deepvariant": "DeepVariant",
     "longcalld": "longcallD",
     "truthindel": "GIAB truth + indels",
-    "truthall": "GIAB truth + all het variants",
+    "truthall": "GIAB truth + all HET variants",
 }
 PHASER_LABEL = {
     "whatshap": "WhatsHap",

@@ -3,8 +3,13 @@
 # per class, genome-wide and per stratum: plots/read_classes.py for every run
 # (caller x phaser) of every cell.
 #
-#   metrics_reads/<run>.classes.tsv
-#   metrics_reads/summary_classes.tsv      all runs, one header
+#   metrics_reads/<run>.classes<sfx>.tsv
+#   metrics_reads/summary_classes<sfx>.tsv      all runs, one header
+#
+# READ_CLASSES_TRUTH, the labels the tagged reads are scored against:
+# consensus (default; reads/<T2T cell>.consensus.tsv.gz of bin/consensus_truth.sh,
+# sfx _consensus), matpat or kmer (likewise), or truthtags (the truth haplotag
+# list, sfx empty: the tables of before). A cell without the labels is skipped.
 #
 # Needs, per cell: the read table (bin/read_tables.sh), the allele matrix of the
 # input (bin/allele_matrix.sh), the truth haplotag list (eval_run.sh) and the
@@ -20,6 +25,12 @@ source "/autofs/bal36/dten/phasing_benchmark/lib.sh"
 source "/autofs/bal36/dten/phasing_benchmark/config.sh"
 
 CLASSES_JOBS="${CLASSES_JOBS:-4}"
+READ_CLASSES_TRUTH="${READ_CLASSES_TRUTH:-consensus}"
+case "${READ_CLASSES_TRUTH}" in
+  truthtags) CLASSES_SFX="" ;;
+  consensus|matpat|kmer) CLASSES_SFX="_${READ_CLASSES_TRUTH}" ;;
+  *) die "READ_CLASSES_TRUTH must be consensus, matpat, kmer or truthtags, not ${READ_CLASSES_TRUTH}" ;;
+esac
 mkdir -p "${METRICS_READS_DIR}" "${TMP_DIR}" "${LOGS_DIR}/reads"
 
 # the strata of the figures (tier 1), cut to the autosomes; those with nothing
@@ -37,7 +48,10 @@ classes_one() {
   local table="${READS_DIR}/${cell}.reads.tsv.gz"
   local alleles="${READS_DIR}/${cell}_${caller}"
   local truth_tags="${METRICS_DIR}/$(vcf_name "${platform}" "${depth}" truthtags).tsv"
-  for f in "${table}" "${alleles}.reads.tsv.gz" "${truth_tags}"; do
+  # parental labels do not depend on the reference: those of the T2T-CHM13 cell
+  local labels=""
+  [[ -n "${CLASSES_SFX}" ]] && labels="${READS_DIR}/$(bam_key "${platform}" T2T "${depth}").${READ_CLASSES_TRUTH}.tsv.gz"
+  for f in "${table}" "${alleles}.reads.tsv.gz" "${truth_tags}" ${labels}; do
     [[ -s "${f}" ]] || { warn "${cell} ${caller}: missing ${f}"; return 0; }
   done
 
@@ -47,10 +61,11 @@ classes_one() {
     name="$(vcf_name "${platform}" "${depth}" "${caller}" "${phaser}")"
     tags="${METRICS_DIR}/${name}.haplotag.tsv"
     vcf="${PHASE_DIR}/${name}.vcf.gz"
-    out="${METRICS_READS_DIR}/${name}.classes.tsv"
+    out="${METRICS_READS_DIR}/${name}.classes${CLASSES_SFX}.tsv"
     [[ -s "${tags}" && -s "${vcf}" ]] || continue
     if newer_than "${out}" "${tags}" && newer_than "${out}" "${vcf}" && newer_than "${out}" "${table}" \
-        && newer_than "${out}" "${alleles}.reads.tsv.gz" && newer_than "${out}" "${alleles}.votes.${phaser}.tsv.gz"; then
+        && newer_than "${out}" "${alleles}.reads.tsv.gz" && newer_than "${out}" "${alleles}.votes.${phaser}.tsv.gz" \
+        && { [[ -z "${labels}" ]] || newer_than "${out}" "${labels}"; }; then
       continue
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${REFERENCE_NAME}" "${SAMPLE}" \
@@ -64,7 +79,7 @@ classes_one() {
   log "${cell} ${caller}: read classes for $(wc -l <"${jobs}") runs"
   # shellcheck disable=SC2086
   "${PLOTS_PYTHON}" "${PROJECT_ROOT}/plots/read_classes.py" \
-      --reads-table "${table}" --alleles "${alleles}" --truth-tags "${truth_tags}" \
+      --reads-table "${table}" --alleles "${alleles}" --truth-tags "${truth_tags}" ${labels:+--labels "${labels}"} \
       --truth-vcf "${TRUTH_PHASED}" --confident-bed "${CONFIDENT_BED}" \
       ${STRATA_ARGS} --paralog segdups --paralog lowmappabilityall \
       --min-snps "${READACC_MIN_SNPS}" --jobs "${jobs}" \
@@ -77,17 +92,17 @@ PHASER_LIST="${PHASERS[*]}"
 export -f classes_one bam_key vcf_name newer_than log warn die
 export METRICS_DIR METRICS_READS_DIR PHASE_DIR READS_DIR LOGS_DIR TMP_DIR REFERENCE_NAME \
        REGION_NAME SAMPLE TRUTH_PHASED CONFIDENT_BED STRATA_ARGS READACC_MIN_SNPS \
-       PLOTS_PYTHON PROJECT_ROOT PHASER_LIST
+       PLOTS_PYTHON PROJECT_ROOT PHASER_LIST READ_CLASSES_TRUTH CLASSES_SFX
 
-log "${SAMPLE} ${REFERENCE_NAME}: read classes for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}"
+log "${SAMPLE} ${REFERENCE_NAME}: read classes for ${CALLERS[*]} x ${PLATFORMS[*]} x ${DEPTHS[*]}, tagged reads against ${READ_CLASSES_TRUTH}"
 "${PARALLEL}" -j "${CLASSES_JOBS}" classes_one {1} {2} {3} \
     ::: "${CALLERS[@]}" ::: "${PLATFORMS[@]}" ::: "${DEPTHS[@]}" || true
 
-summary="${METRICS_READS_DIR}/summary_classes.tsv"
+summary="${METRICS_READS_DIR}/summary_classes${CLASSES_SFX}.tsv"
 {
-  files=("${METRICS_READS_DIR}"/*.classes.tsv)
+  files=("${METRICS_READS_DIR}"/*.classes${CLASSES_SFX}.tsv)
   [[ -e "${files[0]}" ]] && head -1 "${files[0]}"
-  for f in "${METRICS_READS_DIR}"/*.classes.tsv; do
+  for f in "${METRICS_READS_DIR}"/*.classes${CLASSES_SFX}.tsv; do
     [[ -e "${f}" ]] && tail -n +2 "${f}"
   done
   true

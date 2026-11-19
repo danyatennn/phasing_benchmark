@@ -50,7 +50,7 @@ CLASS_LABEL = {
     "tagged": "Tagged",
     "lowmapq": "MAPQ < 20",
     "no_snp_outside_bed": "Outside confident regions",
-    "no_snp": "No het SNP on the read",
+    "no_snp": "No HET SNP on the read",
     "snps_unphased": "No usable phased SNP",
     "phased_unassigned": "SNPs phased, read not assigned",
 }
@@ -164,7 +164,7 @@ CLASS_TICK = {
     "tagged": "Tagged",
     "lowmapq": "MAPQ < 20",
     "no_snp_outside_bed": "Outside\nconfident\nregions",
-    "no_snp": "No het SNP\non the read",
+    "no_snp": "No HET SNP\non the read",
     "snps_unphased": "No usable\nphased SNP",
     "phased_unassigned": "SNPs phased,\nread not\nassigned",
 }
@@ -377,7 +377,7 @@ def fig11b(db, ctx, ref):
     return enrichment_heatmap(
         ctx, ref, "fig11b_block_end_enrichment", strata,
         lambda pl, p, s: mech.get((pl, depth, "truth", p, s, "break_enrichment"), NAN),
-        "Phase block ends per het SNP,\nrelative to the genome")
+        "Phase block ends per HET SNP,\nrelative to the genome")
 
 
 STRATUM_FEATURES = [
@@ -664,7 +664,7 @@ SAMPLE_METRICS = [
     ("fig9e_samples_read_recall" + TRUTH_SFX, lambda *a: labels_recall(*a),
      "Read haplotagging recall (%)", False, "phaser",
      "Comparison of read haplotagging recall across GIAB samples on GRCh38"),
-    ("fig9d_samples_caller_fnr", caller_value("fnr", 100), "Truth het SNPs missed (FNR, %)", True, "caller",
+    ("fig9d_samples_caller_fnr", caller_value("fnr", 100), "Truth HET SNPs missed (FNR, %)", True, "caller",
      "Comparison of missed heterozygous SNPs across GIAB samples on GRCh38"),
 ]
 
@@ -937,7 +937,7 @@ def fig12a(db, ctx):
 
 def fig12b(db, ctx):
     return reference_strata(db, ctx, "fig12b_reference_strata_block_ends", stratum_block_ends,
-                            "Phase block ends per het SNP")
+                            "Phase block ends per HET SNP")
 
 
 def fig12c(db, ctx):
