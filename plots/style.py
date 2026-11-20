@@ -152,6 +152,7 @@ PAPER_PANELS = {
     # the assemblies against the phasers beside the chromosome figure of the
     # switch errors (assembly gaps)
     "asm_side": (52, 128),                  # figC1_side: switch | NG50, phasers on truth and on hifiasm SNPs, 4 platforms
+    "asm_scatter": (56, 102),               # figC6 (Fig. 6c): beside the chromosome figure (6b, ~110 x 102 mm), as high as it
     # Fig. 2 (the page with the chromosome figure): b and c, side by side
     "samples_paper": (83, 34),              # fig9a/fig9b of ONT 5 kHz, the three samples
     # Fig. 1c: WhatsHap on T2T-CHM13, genome-wide to all difficult regions
@@ -175,6 +176,7 @@ PAPER_PANELS = {
     "donuts": (84, 38),            # figR5 of one platform, GRCh38 beside T2T
     "snps_per_read": (84, 38),     # figR3c, beside figR5
     "confidence": (70, 52),        # fig10d, under figR5
+    "wrong_vs_snps": (70, 60),     # figR3d, the place of fig10d
     "transitions": (98, 52),       # figR20 of one platform, beside fig10d
     "r18": (100, 56),              # figR18, under fig10d, beside the ideogram
     "r18_fig1c": (62, 102),        # figR18 of read recall in bases, Fig. 1c: two columns, beside 1b and 1d/1e

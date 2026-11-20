@@ -724,7 +724,7 @@ def figC6_scatter(db, ctx, sample, ref, depth):
     if not platforms:
         raise NoData("no asm_common_hifiasm/summary_%dx.txt rows of %s on %s - run the common-SNP step"
                      % (depth, sample, ref))
-    w, h = st.PAPER_PANELS["asm_side"]
+    w, h = st.PAPER_PANELS["asm_scatter"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
     grid = fig.add_gridspec(len(platforms) + 1, 1, height_ratios=[1] * len(platforms) + [0.3])
     shown = []
