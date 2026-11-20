@@ -758,16 +758,16 @@ def figC6_scatter(db, ctx, sample, ref, depth):
             continue
         ax.set_title(st.PLATFORM_LABEL[platform])
         ax.set_xscale("log")
-        ax.set_yscale("log")
-        xlo, xhi, ylo, yhi = min(xs) / 1.5, max(xs) * 1.5, min(ys) / 1.2, max(ys) * 1.2
+        xlo, xhi = min(xs) / 1.5, max(xs) * 1.5
         ax.set_xlim(xhi, xlo)          # reversed: fewer switches to the right, the top right corner is best
-        ax.set_ylim(ylo, yhi)
         log_ticks_13(ax.xaxis, xlo, xhi)
-        log_ticks_13(ax.yaxis, ylo, yhi)
         if len(ax.get_xticks()) < 2:
             ax.xaxis.set_major_locator(FixedLocator([float("%.2g" % min(xs)), float("%.2g" % max(xs))]))
-        if len(ax.get_yticks()) < 2:
-            ax.yaxis.set_major_locator(FixedLocator([float("%.2g" % min(ys)), float("%.2g" % max(ys))]))
+        # NG50 within a panel spans 3-fold at most: a linear axis from zero with
+        # round ticks, so an arrow's length is the share of NG50 lost
+        ax.set_ylim(0, max(ys) * 1.15)
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]))
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "%g" % round(v, 3)))
         ax.grid(color=st.GRID, linewidth=0.5)
         ax.set_axisbelow(True)
         ax.set_ylabel("NG50 (Mb)")
