@@ -44,7 +44,9 @@ C  assemblies (dipcall_run.sh) next to the read-based phasers on the truth
                                      haplotype (Q100 labels, Metrics.matpat)
      figC1_side_switch_ng50_...      the phasers on the truth SNPs and on the
                                      hifiasm SNPs, horizontal bars
-     figC6_switch_ng50_...           the same as switch rate against NG50, as B6
+     figC6_switch_ng50_...           the same as switch rate against NG50, as B6,
+                                     on the SNPs phased in both runs
+                                     (asm_common_hifiasm/summary_<depth>x.txt)
 
 HG002 files carry the reference only; another sample's carry its name too
 (figA1_switch_HG001_GRCh38).
@@ -690,17 +692,38 @@ def figC1_side(db, ctx, sample, ref, depth):
                      legend=[("Truth SNPs", PALE, None), ("hifiasm SNPs", 1.0, None)])
 
 
+def hifiasm_common(ctx, sample, ref, depth):
+    """(platform, phaser) -> {"truth": (switch %, NG50 Mb), "hifiasm": (...)}:
+    each phaser on the truth SNPs and on the hifiasm SNPs, both scored on the
+    SNPs phased in both runs (identical position and alleles), from
+    <root>/asm_common_hifiasm/summary_<depth>x.txt"""
+    path = os.path.join(sample_root(ctx.root, sample), "asm_common_hifiasm", "summary_%dx.txt" % depth)
+    out = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            h = fh.readline().split()
+            for line in fh:
+                r = dict(zip(h, line.split()))
+                if r["reference"] == ref:
+                    out[(r["platform"], r["phaser"])] = {
+                        "truth": (float(r["switch_truth"]), float(r["ng50_truth"])),
+                        "hifiasm": (float(r["switch_hifiasm"]), float(r["ng50_hifiasm"]))}
+    return out
+
+
 def figC6_scatter(db, ctx, sample, ref, depth):
     """Switch error rate against phase-block NG50, the read-based phasers on
-    the truth SNPs and on the SNPs of the hifiasm assembly without parents, as
-    B6: a panel per platform, each with its own axes, a phaser in its own
-    marker and colour, open on the truth SNPs, an arrow to the filled point on
-    the hifiasm SNPs. The switch axis runs from more to fewer errors, so the
-    top right corner is best. The same slot as figC1_side."""
-    platforms = [p for p in st.PLATFORMS
-                 if any(db.has((ref, "hifiasm", p, depth, ph)) for ph in phasers_on(p))]
+    the truth SNPs and on the SNPs of the hifiasm assembly without parents,
+    both on the SNPs phased in both runs (hifiasm_common), as B6: a panel per
+    platform, each with its own axes, a phaser in its own marker and colour,
+    open on the truth SNPs, an arrow to the filled point on the hifiasm SNPs.
+    The switch axis runs from more to fewer errors, so the top right corner is
+    best. The same slot as figC1_side."""
+    common = hifiasm_common(ctx, sample, ref, depth)
+    platforms = [p for p in st.PLATFORMS if any((p, ph) in common for ph in phasers_on(p))]
     if not platforms:
-        raise NoData("no phaser runs on the hifiasm SNPs of %s at %dx on %s" % (sample, depth, ref))
+        raise NoData("no asm_common_hifiasm/summary_%dx.txt rows of %s on %s - run the common-SNP step"
+                     % (depth, sample, ref))
     w, h = st.PAPER_PANELS["asm_side"]
     fig = plt.figure(figsize=(w * st.MM, h * st.MM), constrained_layout=True)
     grid = fig.add_gridspec(len(platforms) + 1, 1, height_ratios=[1] * len(platforms) + [0.3])
@@ -711,8 +734,7 @@ def figC6_scatter(db, ctx, sample, ref, depth):
         for ph in phasers_on(platform):
             pts = []
             for inp in ("truth", "hifiasm"):
-                k = (ref, inp, platform, depth, ph)
-                x, y = switch_pct(db, k), n50_mb(db, k)
+                x, y = common.get((platform, ph), {}).get(inp, (math.nan, math.nan))
                 pts.append((x, y) if finite(x) and finite(y) and x > 0 and y > 0 else None)
             if not any(pts):
                 continue
@@ -764,7 +786,7 @@ def figC6_scatter(db, ctx, sample, ref, depth):
                 Line2D([], [], marker="o", linestyle="none", markersize=3, color=st.MUTED, label="hifiasm SNPs")]
     legend_ax.legend(handles=handles, loc="center", ncol=2, borderaxespad=0, columnspacing=0.8,
                      handletextpad=0.2, handlelength=1.0, labelspacing=0.3, frameon=False)
-    paper_title(fig, "Phasers on the truth SNPs and on the hifiasm SNPs, %d×" % depth)
+    paper_title(fig, "Switch error rate and NG50 with truth and assembly-derived SNPs")
     return save(fig, ctx, fig_name("figC6_switch_ng50_%dx" % depth, sample, ref))
 
 
